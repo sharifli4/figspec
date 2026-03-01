@@ -1,0 +1,1194 @@
+src/figma/rest-client.ts
+  cb2b05f8243f8437 1-128
+.gitignore
+  cb2b05f8243f8437 5
+src/figma/cache.ts
+  cb2b05f8243f8437 1-35
+src/index.ts
+  cb2b05f8243f8437 9,21,28-29,40-45,49
+package.json
+  cb2b05f8243f8437 4
+src/analyzer/design-analyzer.ts
+  cb2b05f8243f8437 1,14,21-23,25-26,30,32-34,37-42,48-54,64-66,68,72,74-77,104-105,109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.7",
+  "base_commit_sha": "e9b52337d243947bc123d3eba56aa2b32318d816",
+  "prompts": {
+    "4204b4d9fd13ee0e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cc070fef-ad82-4bd9-8376-5c6beded0feb",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "kenan <kenansharifov400@gmail.com>",
+      "messages": [
+        {
+          "type": "user",
+          "text": "how could we make that project just figma plugin? ",
+          "timestamp": "2026-03-01T13:16:53.017Z"
+        },
+        {
+          "type": "assistant",
+          "text": "The user is asking about transforming their project into a Figma plugin. Let me first understand what the current project is about by reading the codebase.",
+          "timestamp": "2026-03-01T13:16:56.097Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Let me first understand the current project structure and what it does.",
+          "timestamp": "2026-03-01T13:16:56.473Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Agent",
+          "input": {
+            "description": "Explore project structure",
+            "prompt": "Explore the entire codebase of this project. I need to understand:\n1. What the project does (read README, main files, config files)\n2. The full directory structure\n3. Key source files and their purpose\n4. How it currently works (CLI? Web app? etc.)\n\nRead all important files including package.json, any config, the main source files, and the backend-spec.md file.",
+            "subagent_type": "Explore"
+          },
+          "timestamp": "2026-03-01T13:16:59.580Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Now I have a thorough understanding of the project. The user wants to know how they could turn this into a Figma plugin instead of a CLI tool. Let me think about this.\n\nCurrently, the project is a CLI tool that:\n1. Takes a Figma URL\n2. Connects to Figma via MCP (Model Context Protocol) using `figma-developer-mcp`\n3. Analyzes the design structure\n4. Uses Claude API to generate backend specs\n5. Optionally analyzes an existing codebase to match patterns\n6. Outputs a markdown file\n\nTo make this a Figma plugin, the key changes would be:\n\n\n- The plugin would split into a UI layer running in an iframe and a sandbox layer with direct access to the Figma API, eliminating the need for MCP or CLI tools\n- Instead of fetching Figma data remotely, the plugin would directly access the current document's nodes through the Figma Plugin API\n- The architecture would shift away from the CLI structure entirely, with the analysis and Claude API integration happening in the plugin's backend layer (likely through a serverless proxy to handle CORS and API key security)\n- The codebase analysis feature would need rethinking since the plugin can't directly access the file system like the CLI could\n- Output would shift from file writing to displaying results in the plugin UI, clipboard copying, or export options",
+          "timestamp": "2026-03-01T13:18:10.531Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Great question. Here's how you'd convert this CLI tool into a Figma plugin:\n\n## What Changes\n\n**What you gain:** Users click a button inside Figma — no terminal, no URLs, no API keys to manage. Direct access to the design tree via Figma's Plugin API.\n\n**What you lose (or must rethink):** The `--project` codebase analysis feature, since plugins can't access a user's filesystem.\n\n## Architecture\n\n```\nCurrent (CLI):\n  User → CLI → MCP → Figma API → Claude API → markdown file\n\nPlugin:\n  User → Figma Plugin UI → Figma Plugin API (direct) → Your Backend → Claude API → Plugin UI\n```\n\n### Key structural changes:\n\n**1. Figma access becomes trivial.** You no longer need MCP, the `figma/client.ts`, or URL parsing. The plugin sandbox has direct access to `figma.currentPage.selection`, `figma.root`, node trees, etc. Your `design-analyzer.ts` and `structure-extractor.ts` logic stays, but reads from the Figma Plugin API instead of MCP YAML.\n\n**2. You need a lightweight backend proxy.** Figma plugin UIs run in a sandboxed iframe — you can't call the Anthropic API directly (CORS + you'd expose API keys). So you'd stand up a small API endpoint (e.g., a Cloudflare Worker, Vercel Edge Function, or simple Express server) that receives the extracted design structure and calls Claude.\n\n**3. The plugin has two layers:**\n- **Sandbox code** (`code.ts`) — runs in Figma's JS environment, has access to the document tree, no DOM\n- **UI code** (`ui.html`) — an iframe with HTML/CSS/JS, communicates with the sandbox via `postMessage`\n\n**4. Codebase matching needs a different approach.** Options:\n- Drop it (most plugins just generate generic specs)\n- Let users paste a `package.json` or config into the UI\n- Offer a companion VS Code extension that sends codebase profile to the plugin\n- Let users select a preset (NestJS + Prisma + PostgreSQL, etc.)\n\n## Rough file structure\n\n```\nfigma-plugin/\n├── manifest.json            # Figma plugin manifest\n├── src/\n│   ├── code.ts              # Sandbox: reads Figma nodes, sends to UI\n│   ├── ui.tsx               # Plugin UI (React or vanilla)\n│   ├── analyzer/\n│   │   ├── structure-extractor.ts   # Reuse most of this\n│   │   └── types.ts                 # Reuse as-is\n│   └── api/\n│       └── client.ts        # Calls your backend proxy\n├── backend/                 # Deployed separately\n│   ├── index.ts             # Receives design data, calls Claude\n│   ├── prompt-builder.ts    # Reuse as-is\n│   └── spec-generator.ts    # Reuse with minor changes\n├── package.json\n├── tsconfig.json\n└── webpack.config.js        # Figma plugins typically use webpack\n```\n\n## What you can reuse directly\n\n| Module | Reusable? | Notes |\n|---|---|---|\n| `structure-extractor.ts` | ~80% | Adapt input from MCP YAML → Figma Plugin API nodes |\n| `prompt-builder.ts` | 100% | Works as-is |\n| `spec-generator.ts` | ~90% | Move to backend, same Claude call |\n| `revision-prompt-builder.ts` | 100% | If you keep codebase matching |\n| `spec-reviser.ts` | ~90% | Move to backend |\n| `types.ts` (all) | 100% | Shared types |\n| `figma/client.ts` | 0% | Replaced by Plugin API |\n| `figma/url-parser.ts` | 0% | No URLs needed |\n| `codebase/*` | 0% in plugin | Could run server-side if user uploads config |\n| `index.ts` (CLI) | 0% | Replaced by plugin UI |\n| `markdown-writer.ts` | 0% | Output goes to UI instead |\n\n## The main engineering work\n\n1. **Write `code.ts`** — walk the Figma node tree using `figma.root.findAll()`, extract the same structure your MCP client currently gets, but natively\n2. **Build a small UI** — a panel where users select pages/frames, pick a stack preset, and see the generated spec\n3. **Deploy a backend proxy** — a thin endpoint that receives design JSON and returns the Claude-generated spec\n4. **Handle auth** — either per-user API keys entered in the plugin UI, or your own API key behind a usage-limited backend\n\nWant me to plan the implementation in detail, or start building it?",
+          "timestamp": "2026-03-01T13:18:34.540Z"
+        },
+        {
+          "type": "user",
+          "text": "will result be same with current architectural result? ",
+          "timestamp": "2026-03-01T13:20:25.399Z"
+        },
+        {
+          "type": "assistant",
+          "text": "\n\nYes, the result would be identical. Here's why:\n\nThe core pipeline that determines output quality is:\n\n```\nExtracted design structure → Prompt → Claude → Markdown spec\n```\n\nThat middle part — `prompt-builder.ts` and `spec-generator.ts` — stays exactly the same. Claude receives the same prompt, produces the same spec.\n\nThe only variable is **step 1: how you extract the design structure**. And the plugin version actually gives you **better** data. Right now your MCP path does:\n\n```\nFigma API → figma-developer-mcp (npx) → YAML → your parser → DesignAnalysis\n```\n\nThat MCP layer is a middleman that serializes to YAML, which you then parse back. The plugin version does:\n\n```\nFigma Plugin API → your extractor → DesignAnalysis\n```\n\nDirect access to the node tree — no serialization round-trip, no YAML parsing, no depth limits from the REST API. You get richer data (computed styles, component variants, auto-layout properties, constraints) that the MCP tool may not expose.\n\nSo the result would be the same or **slightly better**, since you'd feed Claude more complete design information.\n\nThe one caveat: the `--project` codebase matching feature. If you implement it via stack presets in the UI instead of actual codebase analysis, the revision pass would be less precise — it wouldn't know your exact model names or folder structure. But if you add a \"paste your package.json\" option or similar, you can get close.",
+          "timestamp": "2026-03-01T13:20:37.616Z"
+        },
+        {
+          "type": "user",
+          "text": "ok, how could I test current version? ",
+          "timestamp": "2026-03-01T13:21:51.827Z"
+        },
+        {
+          "type": "assistant",
+          "text": "The user wants to test the current CLI version of the tool. Let me check what's needed - they need API keys set up, the project built, and a Figma URL to test with.",
+          "timestamp": "2026-03-01T13:21:54.970Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Let me check what's needed to run it.",
+          "timestamp": "2026-03-01T13:21:55.515Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Read",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/package.json"
+          },
+          "timestamp": "2026-03-01T13:21:56.509Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Read",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/.env.example"
+          },
+          "timestamp": "2026-03-01T13:21:56.891Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Read",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/README.md"
+          },
+          "timestamp": "2026-03-01T13:21:57.180Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Let me check if dependencies are installed and if there's a .env file configured.",
+          "timestamp": "2026-03-01T13:21:59.399Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Three steps:\n\n### 1. Install dependencies (if not done)\n\n```bash\ncd ~/repositories/design-spec\nnpm install\n```\n\n### 2. Set up your `.env`\n\n```bash\ncp .env.example .env\n```\n\nThen edit `.env` with your keys:\n\n```\nFIGMA_API_KEY=<your Figma personal access token>\nANTHROPIC_API_KEY=<your Anthropic API key>\n```\n\n- **Figma token**: Figma → Settings → Personal access tokens → Generate\n- **Anthropic key**: console.anthropic.com → API Keys\n\n### 3. Run it\n\nPoint it at any Figma design URL:\n\n```bash\n# Dev mode (no build needed)\nnpm run dev -- \"https://www.figma.com/design/YOUR_FILE_ID/YourDesign\"\n\n# Or with codebase matching against an existing project\nnpm run dev -- \"https://www.figma.com/design/YOUR_FILE_ID/YourDesign\" -p /path/to/your/backend\n```\n\nThe output lands in `./backend-spec.md` by default (or use `-o` to change it).\n\nDo you have both API keys ready, or do you need help getting either one?",
+          "timestamp": "2026-03-01T13:22:05.015Z"
+        },
+        {
+          "type": "user",
+          "text": "[ERROR] Error fetching file bCWI********Y6Zh: Failed to make request to Figma API endpoint '/files/bCWIhNdizlN016kHbPY6Zh/nodes?ids=3077:45202': Fetch failed with status 429: Too Many Requests\n\nError: MCP tool \"get_figma_data\" failed: Error fetching file: Failed to make request to Figma API endpoint '/files/bCWIhNdizlN016kHbPY6Zh/nodes?ids=3077:45202': Fetch failed with status 429: Too Many Requests",
+          "timestamp": "2026-03-01T13:24:14.061Z"
+        },
+        {
+          "type": "assistant",
+          "text": "The user is getting a 429 Too Many Requests error from the Figma API. This means they're hitting rate limits. Let me look at how the design analyzer makes requests to see if there's excessive API calling happening.",
+          "timestamp": "2026-03-01T13:24:18.270Z"
+        },
+        {
+          "type": "assistant",
+          "text": "You're hitting Figma's API rate limit. Let me check how the analyzer makes requests — it's likely firing too many calls too fast.",
+          "timestamp": "2026-03-01T13:24:19.255Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Read",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/src/analyzer/design-analyzer.ts"
+          },
+          "timestamp": "2026-03-01T13:24:20.081Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Read",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/src/figma/client.ts"
+          },
+          "timestamp": "2026-03-01T13:24:20.391Z"
+        },
+        {
+          "type": "assistant",
+          "text": "The issue is clear. In `design-analyzer.ts`, line 77-81, it loops through each page sequentially and deep-fetches them one by one. If the Figma file has many pages, that's many API calls in quick succession, hitting the rate limit.\n\nThe fix is to add rate limiting / retry with backoff logic. Let me add:\n1. A delay between requests\n2. Retry logic with exponential backoff for 429 errors",
+          "timestamp": "2026-03-01T13:24:25.738Z"
+        },
+        {
+          "type": "assistant",
+          "text": "The problem is on line 78-81 of `design-analyzer.ts` — it deep-fetches every page in a loop with no delay between requests. On a file with multiple pages, that hammers the Figma API and triggers the 429 rate limit.\n\nTwo fixes needed:\n\n1. **Add a delay between requests** in the client\n2. **Add retry with backoff** for 429 errors",
+          "timestamp": "2026-03-01T13:24:28.104Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Edit",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/src/figma/client.ts",
+            "new_string": "const RATE_LIMIT_DELAY_MS = 1000;\nconst MAX_RETRIES = 3;\nconst BACKOFF_BASE_MS = 2000;\n\nfunction sleep(ms: number): Promise<void> {\n  return new Promise((resolve) => setTimeout(resolve, ms));\n}\n\nexport class FigmaMcpClient {\n  private client: Client;\n  private transport: StdioClientTransport | null = null;\n  private availableTools: Tool[] = [];\n  private lastRequestTime = 0;\n\n  constructor(private figmaApiKey: string) {",
+            "old_string": "export class FigmaMcpClient {\n  private client: Client;\n  private transport: StdioClientTransport | null = null;\n  private availableTools: Tool[] = [];\n\n  constructor(private figmaApiKey: string) {",
+            "replace_all": false
+          },
+          "timestamp": "2026-03-01T13:24:31.515Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Edit",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/src/figma/client.ts",
+            "new_string": "  async callTool(\n    name: string,\n    args: Record<string, unknown>\n  ): Promise<unknown> {\n    // Throttle requests to avoid 429s\n    const now = Date.now();\n    const elapsed = now - this.lastRequestTime;\n    if (elapsed < RATE_LIMIT_DELAY_MS) {\n      await sleep(RATE_LIMIT_DELAY_MS - elapsed);\n    }\n\n    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {\n      this.lastRequestTime = Date.now();\n      const result = await this.client.callTool({ name, arguments: args });\n      const content = result.content as Array<{ type: string; text?: string }>;\n\n      if (result.isError) {\n        const text =\n          content\n            .filter((c) => c.type === \"text\" && c.text)\n            .map((c) => c.text)\n            .join(\"\\n\") || \"Unknown error\";\n\n        // Retry on 429\n        if (text.includes(\"429\") && attempt < MAX_RETRIES) {\n          const backoff = BACKOFF_BASE_MS * Math.pow(2, attempt);\n          await sleep(backoff);\n          continue;\n        }\n\n        throw new Error(`MCP tool \"${name}\" failed: ${text}`);\n      }\n\n      const textParts = content\n        .filter((c) => c.type === \"text\" && c.text)\n        .map((c) => c.text!);\n\n      if (textParts.length === 0) {\n        return null;\n      }\n\n      return textParts.join(\"\\n\");\n    }\n\n    throw new Error(`MCP tool \"${name}\" failed after ${MAX_RETRIES} retries`);\n  }",
+            "old_string": "  async callTool(\n    name: string,\n    args: Record<string, unknown>\n  ): Promise<unknown> {\n    const result = await this.client.callTool({ name, arguments: args });\n    const content = result.content as Array<{ type: string; text?: string }>;\n\n    if (result.isError) {\n      const text =\n        content\n          .filter((c) => c.type === \"text\" && c.text)\n          .map((c) => c.text)\n          .join(\"\\n\") || \"Unknown error\";\n      throw new Error(`MCP tool \"${name}\" failed: ${text}`);\n    }\n\n    const textParts = content\n      .filter((c) => c.type === \"text\" && c.text)\n      .map((c) => c.text!);\n\n    if (textParts.length === 0) {\n      return null;\n    }\n\n    return textParts.join(\"\\n\");\n  }",
+            "replace_all": false
+          },
+          "timestamp": "2026-03-01T13:24:44.218Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Now try running it again. The client will:\n\n- **Wait 1s between requests** to stay under the rate limit\n- **Retry up to 3 times** with exponential backoff (2s, 4s, 8s) if it still gets a 429\n\nIt'll be slower but won't get blocked. If your Figma file has many pages, you can also target a specific node instead of the whole file to reduce API calls:\n\n```bash\nnpm run dev -- \"https://www.figma.com/design/bCWIhNdizlN016kHbPY6Zh/YourDesign?node-id=3077-45202\"\n```",
+          "timestamp": "2026-03-01T13:25:03.818Z"
+        },
+        {
+          "type": "user",
+          "text": "⠹ Analyzing design structure...[INFO] [fetchWithRetry] Initial fetch failed for https://api.figma.com/v1/files/bCWIhNdizlN016kHbPY6Zh/nodes?ids=3077:45214: Fetch failed with status 429: Too Many Requests. Likely a corporate proxy or SSL issue. Attempting curl fallback.\n[INFO] [fetchWithRetry] Executing curl with args: [\"-s\",\"-S\",\"--fail-with-body\",\"-L\",\"-H\",\"X-Figma-Token: figd********WAFs\",\"https://api.figma.com/v1/files/bCWIhNdizlN016kHbPY6Zh/nodes?ids=3077:45214\"]\n⠇ Analyzing design structure...[ERROR] [fetchWithRetry] Curl fallback also failed for https://api.figma.com/v1/files/bCWIhNdizlN016kHbPY6Zh/nodes?ids=3077:45214: Command failed: curl -s -S --fail-with-body -L -H X-Figma-Token: figd********WAFs https://api.figma.com/v1/files/bCWIhNdizlN016kHbPY6Zh/nodes?ids=3077:45214",
+          "timestamp": "2026-03-01T13:25:48.839Z"
+        },
+        {
+          "type": "assistant",
+          "text": "The 429 is still happening, and it's coming from within the `figma-developer-mcp` tool itself (the MCP server has its own fetch logic with retry/curl fallback). My rate limiting in the client helps between calls, but the MCP server is making multiple internal requests too.\n\nAlso, I notice the user's Figma API token is visible in the error log: `figd********WAFs`. I should warn them about this.\n\nThe 429 is likely because:\n1. The file is large with many pages/nodes\n\n\n2. The initial overview fetch plus subsequent page fetches are hitting the API too rapidly in succession\n3. The MCP server itself may be making multiple sub-requests per `get_figma_data` call\n\nI should increase the delay between requests significantly—maybe 2-3 seconds—and suggest they wait a minute for the rate limit window to reset. I also need to warn them that their personal access token is exposed in the logs and should be regenerated immediately.",
+          "timestamp": "2026-03-01T13:25:59.307Z"
+        },
+        {
+          "type": "assistant",
+          "text": "**First — your Figma API token is exposed in that error output.** You should regenerate it in Figma Settings → Personal access tokens after we get this working.\n\nThe 429 is coming from inside `figma-developer-mcp` itself — it makes its own sub-requests that our throttling can't control. Two things to do:\n\n**1. Wait a minute** — you're likely still in a rate limit cooldown window from the previous attempts.\n\n**2. Increase the delay** so the MCP server's internal requests don't stack up:",
+          "timestamp": "2026-03-01T13:26:01.733Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Edit",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/src/figma/client.ts",
+            "new_string": "const RATE_LIMIT_DELAY_MS = 3000;\nconst MAX_RETRIES = 4;\nconst BACKOFF_BASE_MS = 5000;",
+            "old_string": "const RATE_LIMIT_DELAY_MS = 1000;\nconst MAX_RETRIES = 3;\nconst BACKOFF_BASE_MS = 2000;",
+            "replace_all": false
+          },
+          "timestamp": "2026-03-01T13:26:03.210Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Also, your Figma file likely has multiple pages. The analyzer fetches every page deep — let me check how many pages it's hitting and limit the initial fetch.",
+          "timestamp": "2026-03-01T13:26:12.824Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Read",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/src/analyzer/design-analyzer.ts",
+            "limit": 30,
+            "offset": 54
+          },
+          "timestamp": "2026-03-01T13:26:13.855Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Your URL has a `node-id` in it, so it should be hitting `analyzeNode` (line 56) which makes only **one** API call. But it seems the previous failed runs burned through your rate limit quota.\n\nHere's what to do:\n\n1. **Wait about 1-2 minutes** for the rate limit to reset\n2. **Run again with the node-id URL** — that path makes far fewer API calls:\n\n```bash\nnpm run dev -- \"https://www.figma.com/design/bCWIhNdizlN016kHbPY6Zh/YourDesign?node-id=3077-45202\"\n```\n\nIf it keeps failing, you can test with the Figma API directly first to confirm your rate limit has cleared:\n\n```bash\ncurl -s -o /dev/null -w \"%{http_code}\" -H \"X-Figma-Token: YOUR_NEW_TOKEN\" \"https://api.figma.com/v1/me\"\n```\n\nIf that returns `200`, you're good to run again. If `429`, wait longer.",
+          "timestamp": "2026-03-01T13:26:23.200Z"
+        },
+        {
+          "type": "user",
+          "text": "generated new token, still 429 error",
+          "timestamp": "2026-03-01T13:28:55.689Z"
+        },
+        {
+          "type": "assistant",
+          "text": "The user is still getting 429 errors even with a new token. This is persistent rate limiting from Figma. Let me think about what's happening:\n\n1. The `figma-developer-mcp` MCP server might be making multiple internal API calls per `get_figma_data` invocation\n2. Figma's rate limit might be per-account, not per-token, so generating a new token doesn't help\n3. The file might be very large, causing the MCP server to make many sub-requests\n\nLet me check if maybe we can bypass the MCP entirely and use the Figma REST API directly. This would give us more control over rate limiting. Or we could add a simple mode that uses the Figma REST API directly with proper rate limiting.\n\n\nThe rate limit is per-user and the repeated failed retries have likely triggered Figma's throttling, which could persist for several minutes. The MCP server itself might be compounding the issue by making multiple internal requests for each call. I should suggest waiting it out, bypassing the MCP to call the Figma REST API directly with controlled rate limiting, or exploring configuration options for the MCP server. rate limiting\n\nLet me suggest option 2 as a more robust solution - add a direct Figma API client as a fallback/alternative. This gives us full control.\n\nActually, let me first check - can we just test if the Figma API itself is accessible? Let me ask the user to try a simple curl to see if the rate limit has cleared.\n\nWait, the user said they generated a new token and it's still 429. This means:\n- Figma rate limits are per-account/IP, not per-token\n- They need to wait longer\n- OR the MCP server is making too many requests per invocation\n\nLet me suggest they wait 5 minutes, and if that doesn't work, we should add a direct Figma REST API client that we fully control.\n\nLet me first verify the rate limit status with a simple curl, then if needed, add a direct API client.",
+          "timestamp": "2026-03-01T13:29:14.075Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Figma rate limits are per-account, not per-token — a new token doesn't reset the window. Let's check if the API is accessible yet.",
+          "timestamp": "2026-03-01T13:29:14.181Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "AskUserQuestion",
+          "input": {
+            "questions": [
+              {
+                "header": "Rate limit",
+                "multiSelect": false,
+                "options": [
+                  {
+                    "description": "Rate limit has cleared, API is accessible",
+                    "label": "200"
+                  },
+                  {
+                    "description": "Still rate limited",
+                    "label": "429"
+                  },
+                  {
+                    "description": "Token issue",
+                    "label": "403"
+                  }
+                ],
+                "question": "Can you run this curl to check your rate limit status? Replace YOUR_TOKEN with your new token:\n\n```\ncurl -s -o /dev/null -w \"%{http_code}\" -H \"X-Figma-Token: YOUR_TOKEN\" \"https://api.figma.com/v1/me\"\n```\n\nWhat HTTP status code does it return?"
+              }
+            ]
+          },
+          "timestamp": "2026-03-01T13:29:17.062Z"
+        },
+        {
+          "type": "assistant",
+          "text": "403 means your new token isn't valid. When you generated it in Figma:\n\n1. Go to **Figma** → **Settings** (your avatar top-left) → **Security** tab\n2. Scroll to **Personal access tokens**\n3. Click **Generate new token**\n4. Give it a name, and make sure the **File content** scope has **Read** access\n5. Copy the full token (starts with `figd_`)\n\nThen update your `.env`:\n\n```bash\nANTHROPIC_API_KEY=your-existing-key\nFIGMA_API_KEY=figd_your_new_token_here\n```\n\nAnd test again with:\n\n```bash\ncurl -s -o /dev/null -w \"%{http_code}\" -H \"X-Figma-Token: figd_your_new_token\" \"https://api.figma.com/v1/me\"\n```\n\nThat should return `200`. Once it does, try the tool again.",
+          "timestamp": "2026-03-01T13:30:04.219Z"
+        },
+        {
+          "type": "user",
+          "text": "curl -s -o /dev/null -w \"%{http_code}\" -H \"X-Figma-Token: figf********D7f-\" \"https://api.figma.com/v1/me\"",
+          "timestamp": "2026-03-01T13:31:00.749Z"
+        },
+        {
+          "type": "assistant",
+          "text": "The user is showing me their curl command. I notice they have \"figfigd_\" at the beginning - they typed \"fig\" before \"figd_\" which is a typo. The token should start with just \"figd_\". Also, they're sharing their token with me again - I should warn them.\n\nLet me point out the typo.",
+          "timestamp": "2026-03-01T13:31:05.199Z"
+        },
+        {
+          "type": "assistant",
+          "text": "There's a typo in your token — it says `figfigd_` instead of `figd_`. You have an extra `fig` prefix.\n\nAlso, **you're sharing your token again** — please regenerate it after we're done.\n\nTry:\n\n```bash\ncurl -s -o /dev/null -w \"%{http_code}\" -H \"X-Figma-Token: figd********D7f-\" \"https://api.figma.com/v1/me\"\n```\n\nIf that returns `200`, update your `.env` and run the tool.",
+          "timestamp": "2026-03-01T13:31:07.609Z"
+        },
+        {
+          "type": "user",
+          "text": "curl -s -o /dev/null -w \"%{http_code}\" -H \"X-Figma-Token: figd********D7f-\" \"https://api.figma.com/v1/me\"",
+          "timestamp": "2026-03-01T13:31:31.049Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Your token still looks off — it has `PsdPsd` (doubled) in the middle. Double-check the exact token you copied from Figma and try again carefully.\n\nAnd a reminder: **stop sharing your tokens here.** After this is working, regenerate the token one more time since it's been exposed in this conversation.",
+          "timestamp": "2026-03-01T13:31:35.267Z"
+        },
+        {
+          "type": "user",
+          "text": "still 403",
+          "timestamp": "2026-03-01T13:34:01.135Z"
+        },
+        {
+          "type": "assistant",
+          "text": "The user is still getting 403. Let me think about what could be wrong:\n\n1. The token might not have the right scopes/permissions\n2. The token might not have been generated correctly\n3. There could be an issue with the Figma account\n\nLet me guide them through generating a new token with the right permissions more carefully. In newer Figma versions, when creating personal access tokens, you need to explicitly set scopes.\n\nActually, let me suggest they try a different approach - let them show me the actual response body (not just status code) to see what the error message says.",
+          "timestamp": "2026-03-01T13:34:06.097Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Let's see the actual error message instead of just the status code:\n\n```bash\ncurl -s -H \"X-Figma-Token: YOUR_TOKEN\" \"https://api.figma.com/v1/me\"\n```\n\nRun that (with your token) and paste the response body — it'll tell us exactly why it's rejecting. **But redact the token from the command before pasting here.**",
+          "timestamp": "2026-03-01T13:34:07.950Z"
+        },
+        {
+          "type": "user",
+          "text": "it worked",
+          "timestamp": "2026-03-01T13:36:20.609Z"
+        },
+        {
+          "type": "assistant",
+          "text": "\n\nNow update your `.env` with that working token and run the tool:\n\n```bash\nnpm run dev -- \"https://www.figma.com/design/bCWIhNdizlN016kHbPY6Zh/YourDesign?node-id=3077-45202\"\n```",
+          "timestamp": "2026-03-01T13:36:23.761Z"
+        },
+        {
+          "type": "user",
+          "text": "with keeping current structure , can we make also plugin variant? ",
+          "timestamp": "2026-03-01T13:37:07.012Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "EnterPlanMode",
+          "input": {},
+          "timestamp": "2026-03-01T13:37:09.663Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Agent",
+          "input": {
+            "description": "Explore shared code for plugin",
+            "prompt": "I need to understand the full codebase structure of this project at /home/kenan/repositories/design-spec to plan adding a Figma plugin variant alongside the existing CLI tool.\n\nSpecifically I need to understand:\n1. All source files and their imports/exports - which modules are tightly coupled to CLI/MCP and which are pure logic\n2. The types defined across the project (especially in analyzer/types.ts, figma/types.ts, generator/types.ts, codebase/types.ts)\n3. How the main entry point (src/index.ts) orchestrates the pipeline\n4. The structure-extractor.ts - what input format it expects and what it outputs\n5. The prompt-builder.ts and spec-generator.ts - are they pure functions or do they have side effects?\n6. The revision-prompt-builder.ts and spec-reviser.ts\n7. The markdown-writer.ts\n8. tsconfig.json and build configuration\n\nRead ALL source files thoroughly. I need to know exactly which modules can be reused as-is for a Figma plugin and which need adaptation.",
+            "subagent_type": "Explore"
+          },
+          "timestamp": "2026-03-01T13:37:19.445Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Now I have a thorough understanding of the codebase. Let me plan the implementation of a Figma plugin variant alongside the existing CLI tool. The key is a monorepo structure that shares core logic.\n\nLet me design the plan now.",
+          "timestamp": "2026-03-01T13:42:04.547Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Agent",
+          "input": {
+            "description": "Plan plugin architecture",
+            "prompt": "I need to design an implementation plan for adding a Figma plugin variant alongside an existing CLI tool. Here's the full context:\n\n## Current Project\nA CLI tool (`design-spec`) at /home/kenan/repositories/design-spec that:\n1. Connects to Figma via MCP (Model Context Protocol) to fetch design nodes\n2. Analyzes the design structure (classifies screens, extracts entities, infers data models)\n3. Sends a prompt to Claude API to generate a backend specification\n4. Optionally analyzes an existing codebase to revise the spec to match its patterns\n5. Outputs a markdown file\n\n## Module Reusability Analysis\nThese modules are **100% pure logic** (no side effects, no I/O):\n- `analyzer/structure-extractor.ts` - Pattern-based Figma node → FrameAnalysis conversion\n- `analyzer/types.ts` - All design analysis types\n- `generator/prompt-builder.ts` - DesignAnalysis → Claude prompt string\n- `generator/revision-prompt-builder.ts` - rawSpec + CodebaseProfile → revision prompt\n- `generator/types.ts` - Generator options\n- `figma/types.ts` - FigmaNode interfaces\n- `figma/url-parser.ts` - URL parsing\n- `codebase/types.ts` - Codebase profile types\n\nThese need **thin adaptation**:\n- `analyzer/design-analyzer.ts` - Currently takes FigmaMcpClient, needs to accept FigmaNode directly\n- `spec-generator.ts` / `spec-reviser.ts` - Call Anthropic SDK, need to route through a backend proxy in plugin context\n- `markdown-writer.ts` - Writes to disk, plugin would display in UI or copy to clipboard\n\nThese are **CLI-only** (not reusable):\n- `index.ts` - Commander CLI\n- `config.ts` - process.env validation\n- `figma/client.ts` - MCP stdio transport\n\n## Goal\nCreate a monorepo structure where:\n1. The existing CLI continues to work as-is\n2. A new Figma plugin package shares the pure logic\n3. The plugin reads the current Figma document directly via Plugin API (no MCP needed)\n4. The plugin sends extracted design data to a small backend proxy that calls Claude\n5. The plugin displays the generated spec in its UI\n\n## Constraints\n- Figma plugins have two execution contexts:\n  - **Sandbox** (`code.ts`): runs in Figma's JS env, has access to `figma.currentPage`, `figma.root`, etc. No DOM, no network.\n  - **UI** (`ui.html`): an iframe with HTML/CSS/JS. Has DOM and network (fetch). Communicates with sandbox via `figma.ui.postMessage()` / `parent.postMessage()`.\n- The Anthropic API key cannot be exposed in client-side code — needs a backend proxy.\n- Figma plugins are bundled with webpack/esbuild into a single `code.js` and `ui.html`.\n\n## Design the implementation plan including:\n1. Monorepo structure (packages/core, packages/cli, packages/plugin, packages/backend)\n2. How to extract shared core logic\n3. Plugin sandbox code (reading Figma nodes, converting to FigmaNode type)\n4. Plugin UI (React or vanilla, what it shows)\n5. Backend proxy (minimal Express/Hono endpoint)\n6. Build configuration for each package\n7. How to handle the codebase matching feature in plugin context (preset selection?)\n8. Step-by-step implementation order\n\nBe specific about file paths and what code goes where.",
+            "subagent_type": "Plan"
+          },
+          "timestamp": "2026-03-01T13:42:24.452Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Now I have a thorough exploration and a detailed plan. Let me synthesize this into a concise, actionable plan file and present it to the user.",
+          "timestamp": "2026-03-01T13:46:26.953Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Now let me write the plan file.",
+          "timestamp": "2026-03-01T13:46:27.442Z"
+        },
+        {
+          "type": "plan",
+          "text": "# Plan: Add Figma Plugin Variant to design-spec\n\n## Context\n\nThe current project is a CLI tool that generates backend specs from Figma designs via MCP + Claude API. The user wants to keep the CLI working while adding a Figma plugin that shares the same core logic. The plugin lets users generate specs directly inside Figma without a terminal.\n\n## Monorepo Structure\n\n```\ndesign-spec/\n├── package.json                  # npm workspaces root\n├── tsconfig.base.json            # shared TS config\n├── packages/\n│   ├── core/                     # Pure logic, zero dependencies\n│   │   └── src/\n│   │       ├── index.ts          # Barrel export\n│   │       ├── analyzer/         # types.ts, structure-extractor.ts, design-analyzer.ts\n│   │       ├── figma/            # types.ts, url-parser.ts\n│   │       ├── generator/        # types.ts, prompt-builder.ts, revision-prompt-builder.ts\n│   │       ├── codebase/         # types.ts only\n│   │       └── output/           # format-spec.ts (pure formatting, no file write)\n│   ├── cli/                      # Existing CLI (imports from core)\n│   │   └── src/\n│   │       ├── index.ts          # Commander entry point\n│   │       ├── config.ts\n│   │       ├── figma/            # client.ts (MCP), mcp-adapter.ts (YAML parsing)\n│   │       ├── generator/        # spec-generator.ts, spec-reviser.ts (Anthropic SDK)\n│   │       ├── codebase/         # codebase-analyzer.ts + all detectors\n│   │       └── output/           # markdown-writer.ts (uses core's formatSpec)\n│   ├── plugin/                   # Figma plugin\n│   │   ├── manifest.json\n│   │   ├── esbuild.config.mjs\n│   │   └── src/\n│   │       ├── sandbox/          # code.ts + node-converter.ts (Figma API → FigmaNode)\n│   │       └── ui/               # Preact UI + api-client.ts (calls backend)\n│   └── backend/                  # Proxy server (Hono)\n│       └── src/\n│           ├── index.ts\n│           ├── routes/           # POST /api/generate, POST /api/revise, GET /api/presets\n│           └── presets/          # Predefined CodebaseProfile stacks\n```\n\n## Key Design Decisions\n\n1. **Core has zero runtime dependencies** — all pure functions and types\n2. **Plugin sandbox** reads Figma nodes via Plugin API, converts to `FigmaNode` with `node-converter.ts`, calls `analyzeDesign()` from core\n3. **Plugin UI** (Preact, ~3KB) sends analysis to backend proxy via `fetch`, displays result\n4. **Backend proxy** (Hono) holds the Anthropic API key, calls `buildPrompt()`/`buildRevisionPrompt()` from core + Anthropic SDK\n5. **Codebase matching** in plugin uses **stack presets** (dropdown: \"NestJS + Prisma + PostgreSQL\", etc.) instead of filesystem scanning\n\n## Core Refactoring\n\nThe main change: `design-analyzer.ts` currently takes `FigmaMcpClient` and parses MCP YAML. Split into:\n- **Core**: new `analyzeDesign(fileName, pages: AnalyzePageInput[], components)` — accepts `FigmaNode` directly\n- **CLI**: new `figma/mcp-adapter.ts` — handles YAML parsing, calls core's `analyzeDesign()`\n\nFiles moved to core unchanged: `structure-extractor.ts`, `prompt-builder.ts`, `revision-prompt-builder.ts`, all `types.ts` files, `url-parser.ts`\n\n## Implementation Steps\n\n### Phase 1: Monorepo skeleton\n- Create root `package.json` (workspaces), `tsconfig.base.json`\n- Create `packages/{core,cli,plugin,backend}/` with `package.json` + `tsconfig.json` each\n\n### Phase 2: Extract core\n- Move pure modules to `packages/core/src/`\n- Refactor `design-analyzer.ts` into core's `analyzeDesign()` function\n- Create `output/format-spec.ts` (pure string formatting)\n- Create barrel export `index.ts`\n\n### Phase 3: Adapt CLI\n- Move CLI-specific files to `packages/cli/src/`\n- Create `figma/mcp-adapter.ts` (YAML parsing extracted from old design-analyzer)\n- Update `index.ts` to import from `@design-spec/core` + use adapter\n- Verify CLI works identically: `npm run dev -- <figma-url>`\n\n### Phase 4: Backend proxy\n- Create Hono server with `POST /api/generate`, `POST /api/revise`, `GET /api/presets`\n- Implement stack presets (5-6 common combinations)\n- Add CORS for Figma plugin iframe origin\n- Test with curl\n\n### Phase 5: Figma plugin\n- `sandbox/node-converter.ts` — converts Figma `SceneNode` → core `FigmaNode`\n- `sandbox/code.ts` — reads selection/page/file, calls `analyzeDesign()`, posts to UI\n- `ui/App.tsx` — Preact UI with analyze buttons, preset dropdown, spec viewer\n- `ui/api-client.ts` — `fetch` calls to backend proxy\n- `esbuild.config.mjs` — bundles `code.js` (IIFE) + `ui.html` (inline JS/CSS)\n\n### Phase 6: Test end-to-end\n- Import plugin in Figma (File → Plugins → Development → Import from manifest)\n- Select frames → click \"Analyze Selection\" → verify spec appears\n- Test with preset → verify revised spec matches stack\n\n## Verification\n- CLI: `cd packages/cli && npm run dev -- \"<figma-url>\"` produces same output as before\n- Backend: `curl -X POST localhost:3001/api/generate -d '{\"analysis\":{...}}'` returns spec\n- Plugin: Load in Figma dev mode, analyze a frame, verify spec generation\n",
+          "timestamp": "2026-03-01T13:46:54.759Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "ExitPlanMode",
+          "input": {
+            "plan": "# Plan: Add Figma Plugin Variant to design-spec\n\n## Context\n\nThe current project is a CLI tool that generates backend specs from Figma designs via MCP + Claude API. The user wants to keep the CLI working while adding a Figma plugin that shares the same core logic. The plugin lets users generate specs directly inside Figma without a terminal.\n\n## Monorepo Structure\n\n```\ndesign-spec/\n├── package.json                  # npm workspaces root\n├── tsconfig.base.json            # shared TS config\n├── packages/\n│   ├── core/                     # Pure logic, zero dependencies\n│   │   └── src/\n│   │       ├── index.ts          # Barrel export\n│   │       ├── analyzer/         # types.ts, structure-extractor.ts, design-analyzer.ts\n│   │       ├── figma/            # types.ts, url-parser.ts\n│   │       ├── generator/        # types.ts, prompt-builder.ts, revision-prompt-builder.ts\n│   │       ├── codebase/         # types.ts only\n│   │       └── output/           # format-spec.ts (pure formatting, no file write)\n│   ├── cli/                      # Existing CLI (imports from core)\n│   │   └── src/\n│   │       ├── index.ts          # Commander entry point\n│   │       ├── config.ts\n│   │       ├── figma/            # client.ts (MCP), mcp-adapter.ts (YAML parsing)\n│   │       ├── generator/        # spec-generator.ts, spec-reviser.ts (Anthropic SDK)\n│   │       ├── codebase/         # codebase-analyzer.ts + all detectors\n│   │       └── output/           # markdown-writer.ts (uses core's formatSpec)\n│   ├── plugin/                   # Figma plugin\n│   │   ├── manifest.json\n│   │   ├── esbuild.config.mjs\n│   │   └── src/\n│   │       ├── sandbox/          # code.ts + node-converter.ts (Figma API → FigmaNode)\n│   │       └── ui/               # Preact UI + api-client.ts (calls backend)\n│   └── backend/                  # Proxy server (Hono)\n│       └── src/\n│           ├── index.ts\n│           ├── routes/           # POST /api/generate, POST /api/revise, GET /api/presets\n│           └── presets/          # Predefined CodebaseProfile stacks\n```\n\n## Key Design Decisions\n\n1. **Core has zero runtime dependencies** — all pure functions and types\n2. **Plugin sandbox** reads Figma nodes via Plugin API, converts to `FigmaNode` with `node-converter.ts`, calls `analyzeDesign()` from core\n3. **Plugin UI** (Preact, ~3KB) sends analysis to backend proxy via `fetch`, displays result\n4. **Backend proxy** (Hono) holds the Anthropic API key, calls `buildPrompt()`/`buildRevisionPrompt()` from core + Anthropic SDK\n5. **Codebase matching** in plugin uses **stack presets** (dropdown: \"NestJS + Prisma + PostgreSQL\", etc.) instead of filesystem scanning\n\n## Core Refactoring\n\nThe main change: `design-analyzer.ts` currently takes `FigmaMcpClient` and parses MCP YAML. Split into:\n- **Core**: new `analyzeDesign(fileName, pages: AnalyzePageInput[], components)` — accepts `FigmaNode` directly\n- **CLI**: new `figma/mcp-adapter.ts` — handles YAML parsing, calls core's `analyzeDesign()`\n\nFiles moved to core unchanged: `structure-extractor.ts`, `prompt-builder.ts`, `revision-prompt-builder.ts`, all `types.ts` files, `url-parser.ts`\n\n## Implementation Steps\n\n### Phase 1: Monorepo skeleton\n- Create root `package.json` (workspaces), `tsconfig.base.json`\n- Create `packages/{core,cli,plugin,backend}/` with `package.json` + `tsconfig.json` each\n\n### Phase 2: Extract core\n- Move pure modules to `packages/core/src/`\n- Refactor `design-analyzer.ts` into core's `analyzeDesign()` function\n- Create `output/format-spec.ts` (pure string formatting)\n- Create barrel export `index.ts`\n\n### Phase 3: Adapt CLI\n- Move CLI-specific files to `packages/cli/src/`\n- Create `figma/mcp-adapter.ts` (YAML parsing extracted from old design-analyzer)\n- Update `index.ts` to import from `@design-spec/core` + use adapter\n- Verify CLI works identically: `npm run dev -- <figma-url>`\n\n### Phase 4: Backend proxy\n- Create Hono server with `POST /api/generate`, `POST /api/revise`, `GET /api/presets`\n- Implement stack presets (5-6 common combinations)\n- Add CORS for Figma plugin iframe origin\n- Test with curl\n\n### Phase 5: Figma plugin\n- `sandbox/node-converter.ts` — converts Figma `SceneNode` → core `FigmaNode`\n- `sandbox/code.ts` — reads selection/page/file, calls `analyzeDesign()`, posts to UI\n- `ui/App.tsx` — Preact UI with analyze buttons, preset dropdown, spec viewer\n- `ui/api-client.ts` — `fetch` calls to backend proxy\n- `esbuild.config.mjs` — bundles `code.js` (IIFE) + `ui.html` (inline JS/CSS)\n\n### Phase 6: Test end-to-end\n- Import plugin in Figma (File → Plugins → Development → Import from manifest)\n- Select frames → click \"Analyze Selection\" → verify spec appears\n- Test with preset → verify revised spec matches stack\n\n## Verification\n- CLI: `cd packages/cli && npm run dev -- \"<figma-url>\"` produces same output as before\n- Backend: `curl -X POST localhost:3001/api/generate -d '{\"analysis\":{...}}'` returns spec\n- Plugin: Load in Figma dev mode, analyze a frame, verify spec generation\n"
+          },
+          "timestamp": "2026-03-01T13:46:57.839Z"
+        },
+        {
+          "type": "assistant",
+          "text": "The user doesn't want the plugin. They want to keep the current CLI architecture but solve the Figma API rate limit problem. Let me think about approaches to avoid the rate limit.\n\nThe issue is that the `figma-developer-mcp` tool makes multiple API calls internally that we can't control. Options:\n\n1. **Cache Figma data locally** — fetch once, save to a JSON file, reuse on subsequent runs\n2. **Use the Figma REST API directly instead of MCP** — we'd have full control over request timing\n3. **Reduce the number of API calls** — fetch with greater depth to reduce round-trips\n\n\n4. **Add a local file mode** — let users export Figma data to a JSON file and use that instead\n\nI should focus on practical solutions rather than getting stuck in planning mode. The most straightforward approach would be implementing local caching or a file-based mode so they're not hitting the API on every run.",
+          "timestamp": "2026-03-01T13:52:09.287Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Got it — no plugin, keep current structure, just fix the rate limit problem. Let me update the plan for that.",
+          "timestamp": "2026-03-01T13:52:09.419Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Read",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/src/analyzer/design-analyzer.ts"
+          },
+          "timestamp": "2026-03-01T13:52:09.580Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Read",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/src/figma/client.ts"
+          },
+          "timestamp": "2026-03-01T13:52:10.095Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Read",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/src/index.ts"
+          },
+          "timestamp": "2026-03-01T13:52:10.525Z"
+        },
+        {
+          "type": "assistant",
+          "text": "The user wants to fix the Figma API rate limiting issue. The core problem is that the `figma-developer-mcp` MCP server itself makes internal API calls that we can't control the timing of. Our throttling in `client.ts` only controls the delay between our `callTool` invocations, but each MCP tool call may trigger multiple internal Figma API requests.\n\nThe fundamental approaches to solve this:\n\n1. **Bypass MCP entirely** — Call the Figma REST API directly with full control over rate limiting. This eliminates the unpredictable MCP middleware.\n\n2. **Add local caching** — Cache Figma responses to a JSON file so subsequent runs don't need to re-fetch. A `--cache` flag or automatic `.figma-cache/` directory.\n\n\n3. **Reduce API calls** — Use the Figma REST API's batch node endpoint to fetch multiple nodes in a single request instead of making separate calls for each page.\n4. **Better retry/backoff** — Though this doesn't address the root cause since MCP handles retries internally anyway.\n\nI'm leaning toward replacing MCP with direct Figma REST API calls, which gives me complete control over request count, timing, retry logic, and the ability to batch multiple node IDs in a single call.\n\nWriting the implementation plan...",
+          "timestamp": "2026-03-01T13:52:22.201Z"
+        },
+        {
+          "type": "assistant",
+          "text": "The root problem: `figma-developer-mcp` makes its own internal API calls that you can't throttle. Our retry logic in `client.ts` only controls the gap between *our* calls to MCP, but each MCP call may fire multiple Figma API requests internally.\n\nThe real fix is to **call the Figma REST API directly** instead of going through MCP. This gives full control over request count and timing.",
+          "timestamp": "2026-03-01T13:52:23.205Z"
+        },
+        {
+          "type": "plan",
+          "text": "# Plan: Replace MCP with Direct Figma REST API to Fix Rate Limiting\n\n## Context\n\nThe tool hits Figma's 429 rate limit because `figma-developer-mcp` makes multiple internal API calls per `get_figma_data` invocation that we can't control. Our throttling in `client.ts` only controls the gap between our calls to MCP, not MCP's internal requests.\n\nThe fix: replace the MCP dependency with direct Figma REST API calls + local caching.\n\n## What Changes\n\n### 1. New `src/figma/rest-client.ts` — Direct Figma REST API client\n\nReplaces `src/figma/client.ts` (MCP client). Uses `fetch` to call the Figma REST API directly with:\n- Throttling (minimum gap between requests)\n- Retry with exponential backoff on 429\n- Two endpoints used:\n  - `GET /v1/files/:key` — file overview (pages, metadata)\n  - `GET /v1/files/:key/nodes?ids=X,Y,Z` — batch fetch specific nodes (reduces call count)\n\nKey improvement: the batch nodes endpoint fetches **multiple pages in one request** instead of one API call per page.\n\n### 2. Update `src/analyzer/design-analyzer.ts`\n\n- Import the new REST client instead of `FigmaMcpClient`\n- Replace YAML parsing with JSON parsing (REST API returns JSON, not YAML)\n- Use batch node fetching: collect all page IDs, fetch in one call\n\n### 3. Update `src/index.ts`\n\n- Replace `FigmaMcpClient` instantiation with new `FigmaRestClient`\n- Remove MCP connection/disconnection logic\n- Simpler startup (no spawning `npx figma-developer-mcp`)\n\n### 4. Add local file caching (`src/figma/cache.ts`)\n\nCache Figma API responses to `.figma-cache/` so re-runs don't hit the API at all. Cache invalidated after 1 hour by default. Can be skipped with `--no-cache` flag.\n\n### 5. Remove MCP dependency\n\n- Remove `@modelcontextprotocol/sdk` from `package.json`\n- Remove `yaml` from dependencies (REST API returns JSON)\n- Delete `src/figma/client.ts`\n\n## Files to Create/Modify\n\n| File | Action |\n|---|---|\n| `src/figma/rest-client.ts` | **Create** — new Figma REST API client |\n| `src/figma/cache.ts` | **Create** — local response caching |\n| `src/figma/client.ts` | **Delete** — MCP client no longer needed |\n| `src/analyzer/design-analyzer.ts` | **Modify** — use REST client, JSON instead of YAML |\n| `src/index.ts` | **Modify** — use REST client, add `--no-cache` flag |\n| `package.json` | **Modify** — remove `@modelcontextprotocol/sdk` and `yaml` deps |\n\n## Implementation Details\n\n### `src/figma/rest-client.ts`\n\n```typescript\nclass FigmaRestClient {\n  constructor(private apiKey: string, private minRequestGap = 1500) {}\n\n  // GET /v1/files/:key — returns file metadata + top-level page nodes\n  async getFile(fileKey: string, depth?: number): Promise<FigmaFileResponse>\n\n  // GET /v1/files/:key/nodes?ids=X,Y,Z — batch fetch nodes (up to ~50 IDs)\n  async getNodes(fileKey: string, nodeIds: string[], depth?: number): Promise<Record<string, FigmaNode>>\n\n  // Internal: throttled fetch with 429 retry\n  private async request(url: string): Promise<unknown>\n}\n```\n\n### `src/figma/cache.ts`\n\n```typescript\n// Writes/reads JSON to .figma-cache/<fileKey>-<hash>.json\n// TTL: 1 hour (configurable)\n// Cache key: fileKey + nodeIds + depth\nasync function getCached(key: string): Promise<unknown | null>\nasync function setCache(key: string, data: unknown): Promise<void>\n```\n\n### Updated `design-analyzer.ts` flow\n\n**Full file analysis (no nodeId):**\n1. `getFile(fileKey, depth=1)` — one request, gets all page IDs\n2. `getNodes(fileKey, [page1Id, page2Id, ...])` — **one request** for all pages (vs N requests before)\n3. Parse JSON responses into `FigmaNode` trees\n4. Run `extractFrame()` on each frame as before\n\n**Single node analysis (with nodeId):**\n1. `getNodes(fileKey, [nodeId])` — one request\n2. Parse and analyze\n\nTotal API calls: **2 for full file, 1 for single node** (vs N+1 through MCP).\n\n## Verification\n\n1. Run with a Figma URL (no node-id): `npm run dev -- \"<full-file-url>\"` — should complete without 429\n2. Run again immediately — should use cache (no API calls)\n3. Run with `--no-cache` — should re-fetch\n4. Run with node-id URL — should make only 1 API call\n5. Compare output spec to previous version — should be equivalent\n",
+          "timestamp": "2026-03-01T13:52:48.636Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "ExitPlanMode",
+          "input": {
+            "allowedPrompts": [
+              {
+                "prompt": "install dependencies",
+                "tool": "Bash"
+              },
+              {
+                "prompt": "run the CLI tool for testing",
+                "tool": "Bash"
+              },
+              {
+                "prompt": "build the project",
+                "tool": "Bash"
+              }
+            ],
+            "plan": "# Plan: Replace MCP with Direct Figma REST API to Fix Rate Limiting\n\n## Context\n\nThe tool hits Figma's 429 rate limit because `figma-developer-mcp` makes multiple internal API calls per `get_figma_data` invocation that we can't control. Our throttling in `client.ts` only controls the gap between our calls to MCP, not MCP's internal requests.\n\nThe fix: replace the MCP dependency with direct Figma REST API calls + local caching.\n\n## What Changes\n\n### 1. New `src/figma/rest-client.ts` — Direct Figma REST API client\n\nReplaces `src/figma/client.ts` (MCP client). Uses `fetch` to call the Figma REST API directly with:\n- Throttling (minimum gap between requests)\n- Retry with exponential backoff on 429\n- Two endpoints used:\n  - `GET /v1/files/:key` — file overview (pages, metadata)\n  - `GET /v1/files/:key/nodes?ids=X,Y,Z` — batch fetch specific nodes (reduces call count)\n\nKey improvement: the batch nodes endpoint fetches **multiple pages in one request** instead of one API call per page.\n\n### 2. Update `src/analyzer/design-analyzer.ts`\n\n- Import the new REST client instead of `FigmaMcpClient`\n- Replace YAML parsing with JSON parsing (REST API returns JSON, not YAML)\n- Use batch node fetching: collect all page IDs, fetch in one call\n\n### 3. Update `src/index.ts`\n\n- Replace `FigmaMcpClient` instantiation with new `FigmaRestClient`\n- Remove MCP connection/disconnection logic\n- Simpler startup (no spawning `npx figma-developer-mcp`)\n\n### 4. Add local file caching (`src/figma/cache.ts`)\n\nCache Figma API responses to `.figma-cache/` so re-runs don't hit the API at all. Cache invalidated after 1 hour by default. Can be skipped with `--no-cache` flag.\n\n### 5. Remove MCP dependency\n\n- Remove `@modelcontextprotocol/sdk` from `package.json`\n- Remove `yaml` from dependencies (REST API returns JSON)\n- Delete `src/figma/client.ts`\n\n## Files to Create/Modify\n\n| File | Action |\n|---|---|\n| `src/figma/rest-client.ts` | **Create** — new Figma REST API client |\n| `src/figma/cache.ts` | **Create** — local response caching |\n| `src/figma/client.ts` | **Delete** — MCP client no longer needed |\n| `src/analyzer/design-analyzer.ts` | **Modify** — use REST client, JSON instead of YAML |\n| `src/index.ts` | **Modify** — use REST client, add `--no-cache` flag |\n| `package.json` | **Modify** — remove `@modelcontextprotocol/sdk` and `yaml` deps |\n\n## Implementation Details\n\n### `src/figma/rest-client.ts`\n\n```typescript\nclass FigmaRestClient {\n  constructor(private apiKey: string, private minRequestGap = 1500) {}\n\n  // GET /v1/files/:key — returns file metadata + top-level page nodes\n  async getFile(fileKey: string, depth?: number): Promise<FigmaFileResponse>\n\n  // GET /v1/files/:key/nodes?ids=X,Y,Z — batch fetch nodes (up to ~50 IDs)\n  async getNodes(fileKey: string, nodeIds: string[], depth?: number): Promise<Record<string, FigmaNode>>\n\n  // Internal: throttled fetch with 429 retry\n  private async request(url: string): Promise<unknown>\n}\n```\n\n### `src/figma/cache.ts`\n\n```typescript\n// Writes/reads JSON to .figma-cache/<fileKey>-<hash>.json\n// TTL: 1 hour (configurable)\n// Cache key: fileKey + nodeIds + depth\nasync function getCached(key: string): Promise<unknown | null>\nasync function setCache(key: string, data: unknown): Promise<void>\n```\n\n### Updated `design-analyzer.ts` flow\n\n**Full file analysis (no nodeId):**\n1. `getFile(fileKey, depth=1)` — one request, gets all page IDs\n2. `getNodes(fileKey, [page1Id, page2Id, ...])` — **one request** for all pages (vs N requests before)\n3. Parse JSON responses into `FigmaNode` trees\n4. Run `extractFrame()` on each frame as before\n\n**Single node analysis (with nodeId):**\n1. `getNodes(fileKey, [nodeId])` — one request\n2. Parse and analyze\n\nTotal API calls: **2 for full file, 1 for single node** (vs N+1 through MCP).\n\n## Verification\n\n1. Run with a Figma URL (no node-id): `npm run dev -- \"<full-file-url>\"` — should complete without 429\n2. Run again immediately — should use cache (no API calls)\n3. Run with `--no-cache` — should re-fetch\n4. Run with node-id URL — should make only 1 API call\n5. Compare output spec to previous version — should be equivalent\n"
+          },
+          "timestamp": "2026-03-01T13:52:52.331Z"
+        },
+        {
+          "type": "assistant",
+          "text": "The user wants to understand the difference between using MCP (Model Context Protocol) to access Figma vs calling the Figma REST API directly, and which is better for their use case.",
+          "timestamp": "2026-03-01T13:53:34.987Z"
+        },
+        {
+          "type": "assistant",
+          "text": "## MCP vs Direct API — for your use case\n\n**How MCP works now:**\n```\nYour code → MCP SDK → spawns `figma-developer-mcp` subprocess → it calls Figma REST API → returns YAML\n```\n\n**How direct API would work:**\n```\nYour code → fetch() → Figma REST API → returns JSON\n```\n\n### Key differences\n\n| | MCP (`figma-developer-mcp`) | Direct REST API |\n|---|---|---|\n| **Rate limit control** | None — MCP server makes its own internal requests, retries, curl fallbacks. You can't control timing. | Full — you control every request, its timing, and retry logic |\n| **Request count** | Unknown — each `get_figma_data` call may trigger multiple internal API calls | Predictable — 1 fetch = 1 API call. Batch endpoint fetches multiple nodes in 1 call |\n| **Response format** | YAML (serialized by MCP server, you parse it back) | JSON (native, no extra parsing layer) |\n| **Dependencies** | `@modelcontextprotocol/sdk` + `yaml` + `figma-developer-mcp` (npx) | None — just `fetch` (built into Node 18+) |\n| **Startup time** | Slow — spawns a child process via `npx`, installs package, initializes MCP transport | Instant — just a fetch call |\n| **Data richness** | MCP tool decides what to return and how to format it — you get what it gives you | Full control — you choose exactly which fields and depth |\n| **Debugging** | Opaque — errors come from inside the MCP server | Transparent — you see exact HTTP status, headers, rate limit info |\n\n### The 429 problem specifically\n\nThe MCP server (`figma-developer-mcp`) has its own internal retry logic — when it hits a 429, it retries with curl as a fallback (you saw this in the error). This means **one `callTool()` from your side can generate 2+ Figma API requests** (original fetch + curl retry). Your throttling can't prevent this because it happens inside the MCP subprocess.\n\nWith direct API calls, you'd see the 429 response yourself, wait the right amount of time (the `Retry-After` header tells you exactly how long), and retry once. No wasted requests.\n\n### Verdict\n\n**Direct API is better for this project.** MCP is designed for cases where you want a standard interface across many different tools (e.g., Claude Desktop connecting to Figma, GitHub, Slack all through MCP). For a dedicated Figma tool, it's an unnecessary abstraction that costs you control, adds latency, and causes the rate limit issue.\n\nWant me to proceed with the plan to swap MCP for direct API calls?",
+          "timestamp": "2026-03-01T13:53:50.221Z"
+        },
+        {
+          "type": "user",
+          "text": "great, then continue",
+          "timestamp": "2026-03-01T13:54:43.931Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskCreate",
+          "input": {
+            "activeForm": "Creating Figma REST client",
+            "description": "Create src/figma/rest-client.ts with throttled fetch, 429 retry with exponential backoff, and two methods: getFile() and getNodes() (batch endpoint).",
+            "subject": "Create Figma REST API client"
+          },
+          "timestamp": "2026-03-01T13:54:48.745Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskCreate",
+          "input": {
+            "activeForm": "Creating response cache",
+            "description": "Create src/figma/cache.ts for caching Figma API responses to .figma-cache/ with 1-hour TTL.",
+            "subject": "Create local response cache"
+          },
+          "timestamp": "2026-03-01T13:54:49.939Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskCreate",
+          "input": {
+            "activeForm": "Updating design analyzer",
+            "description": "Modify src/analyzer/design-analyzer.ts to use FigmaRestClient instead of FigmaMcpClient. Parse JSON instead of YAML. Use batch node fetching.",
+            "subject": "Update design-analyzer to use REST client"
+          },
+          "timestamp": "2026-03-01T13:54:51.086Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskCreate",
+          "input": {
+            "activeForm": "Updating CLI entry point",
+            "description": "Modify src/index.ts to use FigmaRestClient, add --no-cache flag, remove MCP connection/disconnection logic.",
+            "subject": "Update CLI entry point"
+          },
+          "timestamp": "2026-03-01T13:54:52.020Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskCreate",
+          "input": {
+            "activeForm": "Removing MCP dependencies",
+            "description": "Delete src/figma/client.ts, remove @modelcontextprotocol/sdk and yaml from package.json, add .figma-cache/ to .gitignore.",
+            "subject": "Remove MCP dependencies and old client"
+          },
+          "timestamp": "2026-03-01T13:54:53.300Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskCreate",
+          "input": {
+            "activeForm": "Building and verifying",
+            "description": "Run npm run build to verify everything compiles. Check that the CLI still works.",
+            "subject": "Build and verify"
+          },
+          "timestamp": "2026-03-01T13:54:54.239Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskUpdate",
+          "input": {
+            "addBlockedBy": [
+              "1",
+              "2"
+            ],
+            "taskId": "3"
+          },
+          "timestamp": "2026-03-01T13:54:58.057Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskUpdate",
+          "input": {
+            "addBlockedBy": [
+              "1",
+              "2",
+              "3"
+            ],
+            "taskId": "4"
+          },
+          "timestamp": "2026-03-01T13:54:58.618Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskUpdate",
+          "input": {
+            "addBlockedBy": [
+              "4"
+            ],
+            "taskId": "5"
+          },
+          "timestamp": "2026-03-01T13:54:59.083Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskUpdate",
+          "input": {
+            "addBlockedBy": [
+              "5"
+            ],
+            "taskId": "6"
+          },
+          "timestamp": "2026-03-01T13:54:59.483Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "ExitPlanMode",
+          "input": {
+            "allowedPrompts": [
+              {
+                "prompt": "install dependencies",
+                "tool": "Bash"
+              },
+              {
+                "prompt": "build the project",
+                "tool": "Bash"
+              },
+              {
+                "prompt": "run the CLI tool for testing",
+                "tool": "Bash"
+              }
+            ],
+            "plan": "# Plan: Replace MCP with Direct Figma REST API to Fix Rate Limiting\n\n## Context\n\nThe tool hits Figma's 429 rate limit because `figma-developer-mcp` makes multiple internal API calls per `get_figma_data` invocation that we can't control. Our throttling in `client.ts` only controls the gap between our calls to MCP, not MCP's internal requests.\n\nThe fix: replace the MCP dependency with direct Figma REST API calls + local caching.\n\n## What Changes\n\n### 1. New `src/figma/rest-client.ts` — Direct Figma REST API client\n\nReplaces `src/figma/client.ts` (MCP client). Uses `fetch` to call the Figma REST API directly with:\n- Throttling (minimum gap between requests)\n- Retry with exponential backoff on 429\n- Two endpoints used:\n  - `GET /v1/files/:key` — file overview (pages, metadata)\n  - `GET /v1/files/:key/nodes?ids=X,Y,Z` — batch fetch specific nodes (reduces call count)\n\nKey improvement: the batch nodes endpoint fetches **multiple pages in one request** instead of one API call per page.\n\n### 2. Update `src/analyzer/design-analyzer.ts`\n\n- Import the new REST client instead of `FigmaMcpClient`\n- Replace YAML parsing with JSON parsing (REST API returns JSON, not YAML)\n- Use batch node fetching: collect all page IDs, fetch in one call\n\n### 3. Update `src/index.ts`\n\n- Replace `FigmaMcpClient` instantiation with new `FigmaRestClient`\n- Remove MCP connection/disconnection logic\n- Simpler startup (no spawning `npx figma-developer-mcp`)\n\n### 4. Add local file caching (`src/figma/cache.ts`)\n\nCache Figma API responses to `.figma-cache/` so re-runs don't hit the API at all. Cache invalidated after 1 hour by default. Can be skipped with `--no-cache` flag.\n\n### 5. Remove MCP dependency\n\n- Remove `@modelcontextprotocol/sdk` from `package.json`\n- Remove `yaml` from dependencies (REST API returns JSON)\n- Delete `src/figma/client.ts`\n\n## Files to Create/Modify\n\n| File | Action |\n|---|---|\n| `src/figma/rest-client.ts` | **Create** — new Figma REST API client |\n| `src/figma/cache.ts` | **Create** — local response caching |\n| `src/figma/client.ts` | **Delete** — MCP client no longer needed |\n| `src/analyzer/design-analyzer.ts` | **Modify** — use REST client, JSON instead of YAML |\n| `src/index.ts` | **Modify** — use REST client, add `--no-cache` flag |\n| `package.json` | **Modify** — remove `@modelcontextprotocol/sdk` and `yaml` deps |\n\n## Implementation Details\n\n### `src/figma/rest-client.ts`\n\n```typescript\nclass FigmaRestClient {\n  constructor(private apiKey: string, private minRequestGap = 1500) {}\n\n  // GET /v1/files/:key — returns file metadata + top-level page nodes\n  async getFile(fileKey: string, depth?: number): Promise<FigmaFileResponse>\n\n  // GET /v1/files/:key/nodes?ids=X,Y,Z — batch fetch nodes (up to ~50 IDs)\n  async getNodes(fileKey: string, nodeIds: string[], depth?: number): Promise<Record<string, FigmaNode>>\n\n  // Internal: throttled fetch with 429 retry\n  private async request(url: string): Promise<unknown>\n}\n```\n\n### `src/figma/cache.ts`\n\n```typescript\n// Writes/reads JSON to .figma-cache/<fileKey>-<hash>.json\n// TTL: 1 hour (configurable)\n// Cache key: fileKey + nodeIds + depth\nasync function getCached(key: string): Promise<unknown | null>\nasync function setCache(key: string, data: unknown): Promise<void>\n```\n\n### Updated `design-analyzer.ts` flow\n\n**Full file analysis (no nodeId):**\n1. `getFile(fileKey, depth=1)` — one request, gets all page IDs\n2. `getNodes(fileKey, [page1Id, page2Id, ...])` — **one request** for all pages (vs N requests before)\n3. Parse JSON responses into `FigmaNode` trees\n4. Run `extractFrame()` on each frame as before\n\n**Single node analysis (with nodeId):**\n1. `getNodes(fileKey, [nodeId])` — one request\n2. Parse and analyze\n\nTotal API calls: **2 for full file, 1 for single node** (vs N+1 through MCP).\n\n## Verification\n\n1. Run with a Figma URL (no node-id): `npm run dev -- \"<full-file-url>\"` — should complete without 429\n2. Run again immediately — should use cache (no API calls)\n3. Run with `--no-cache` — should re-fetch\n4. Run with node-id URL — should make only 1 API call\n5. Compare output spec to previous version — should be equivalent\n"
+          },
+          "timestamp": "2026-03-01T13:55:02.446Z"
+        }
+      ],
+      "total_additions": 48,
+      "total_deletions": 19,
+      "accepted_lines": 45,
+      "overriden_lines": 0
+    },
+    "cb2b05f8243f8437": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f30501ad-e933-4540-a441-6580e0e107ff",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "kenan <kenansharifov400@gmail.com>",
+      "messages": [
+        {
+          "type": "user",
+          "text": "[Request interrupted by user for tool use]",
+          "timestamp": "2026-03-01T13:55:23.608Z"
+        },
+        {
+          "type": "user",
+          "text": "Implement the following plan:\n\n# Plan: Replace MCP with Direct Figma REST API to Fix Rate Limiting\n\n## Context\n\nThe tool hits Figma's 429 rate limit because `figma-developer-mcp` makes multiple internal API calls per `get_figma_data` invocation that we can't control. Our throttling in `client.ts` only controls the gap between our calls to MCP, not MCP's internal requests.\n\nThe fix: replace the MCP dependency with direct Figma REST API calls + local caching.\n\n## What Changes\n\n### 1. New `src/figma/rest-client.ts` — Direct Figma REST API client\n\nReplaces `src/figma/client.ts` (MCP client). Uses `fetch` to call the Figma REST API directly with:\n- Throttling (minimum gap between requests)\n- Retry with exponential backoff on 429\n- Two endpoints used:\n  - `GET /v1/files/:key` — file overview (pages, metadata)\n  - `GET /v1/files/:key/nodes?ids=X,Y,Z` — batch fetch specific nodes (reduces call count)\n\nKey improvement: the batch nodes endpoint fetches **multiple pages in one request** instead of one API call per page.\n\n### 2. Update `src/analyzer/design-analyzer.ts`\n\n- Import the new REST client instead of `FigmaMcpClient`\n- Replace YAML parsing with JSON parsing (REST API returns JSON, not YAML)\n- Use batch node fetching: collect all page IDs, fetch in one call\n\n### 3. Update `src/index.ts`\n\n- Replace `FigmaMcpClient` instantiation with new `FigmaRestClient`\n- Remove MCP connection/disconnection logic\n- Simpler startup (no spawning `npx figma-developer-mcp`)\n\n### 4. Add local file caching (`src/figma/cache.ts`)\n\nCache Figma API responses to `.figma-cache/` so re-runs don't hit the API at all. Cache invalidated after 1 hour by default. Can be skipped with `--no-cache` flag.\n\n### 5. Remove MCP dependency\n\n- Remove `@modelcontextprotocol/sdk` from `package.json`\n- Remove `yaml` from dependencies (REST API returns JSON)\n- Delete `src/figma/client.ts`\n\n## Files to Create/Modify\n\n| File | Action |\n|---|---|\n| `src/figma/rest-client.ts` | **Create** — new Figma REST API client |\n| `src/figma/cache.ts` | **Create** — local response caching |\n| `src/figma/client.ts` | **Delete** — MCP client no longer needed |\n| `src/analyzer/design-analyzer.ts` | **Modify** — use REST client, JSON instead of YAML |\n| `src/index.ts` | **Modify** — use REST client, add `--no-cache` flag |\n| `package.json` | **Modify** — remove `@modelcontextprotocol/sdk` and `yaml` deps |\n\n## Implementation Details\n\n### `src/figma/rest-client.ts`\n\n```typescript\nclass FigmaRestClient {\n  constructor(private apiKey: string, private minRequestGap = 1500) {}\n\n  // GET /v1/files/:key — returns file metadata + top-level page nodes\n  async getFile(fileKey: string, depth?: number): Promise<FigmaFileResponse>\n\n  // GET /v1/files/:key/nodes?ids=X,Y,Z — batch fetch nodes (up to ~50 IDs)\n  async getNodes(fileKey: string, nodeIds: string[], depth?: number): Promise<Record<string, FigmaNode>>\n\n  // Internal: throttled fetch with 429 retry\n  private async request(url: string): Promise<unknown>\n}\n```\n\n### `src/figma/cache.ts`\n\n```typescript\n// Writes/reads JSON to .figma-cache/<fileKey>-<hash>.json\n// TTL: 1 hour (configurable)\n// Cache key: fileKey + nodeIds + depth\nasync function getCached(key: string): Promise<unknown | null>\nasync function setCache(key: string, data: unknown): Promise<void>\n```\n\n### Updated `design-analyzer.ts` flow\n\n**Full file analysis (no nodeId):**\n1. `getFile(fileKey, depth=1)` — one request, gets all page IDs\n2. `getNodes(fileKey, [page1Id, page2Id, ...])` — **one request** for all pages (vs N requests before)\n3. Parse JSON responses into `FigmaNode` trees\n4. Run `extractFrame()` on each frame as before\n\n**Single node analysis (with nodeId):**\n1. `getNodes(fileKey, [nodeId])` — one request\n2. Parse and analyze\n\nTotal API calls: **2 for full file, 1 for single node** (vs N+1 through MCP).\n\n## Verification\n\n1. Run with a Figma URL (no node-id): `npm run dev -- \"<full-file-url>\"` — should complete without 429\n2. Run again immediately — should use cache (no API calls)\n3. Run with `--no-cache` — should re-fetch\n4. Run with node-id URL — should make only 1 API call\n5. Compare output spec to previous version — should be equivalent\n\n\nIf you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /home/kenan/.claude/projects/-home-kenan-repositories-design-spec/cc070fef-ad82-4bd9-8376-5c6beded0feb.jsonl",
+          "timestamp": "2026-03-01T13:55:23.605Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Let me start by understanding the current codebase structure, then implement the plan step by step.",
+          "timestamp": "2026-03-01T13:55:26.862Z"
+        },
+        {
+          "type": "assistant",
+          "text": "I'll start by reading the existing files to understand the current implementation before making changes.",
+          "timestamp": "2026-03-01T13:55:27.434Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Read",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/package.json"
+          },
+          "timestamp": "2026-03-01T13:55:27.982Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Read",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/src/figma/client.ts"
+          },
+          "timestamp": "2026-03-01T13:55:28.812Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Read",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/src/analyzer/design-analyzer.ts"
+          },
+          "timestamp": "2026-03-01T13:55:29.042Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Read",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/src/index.ts"
+          },
+          "timestamp": "2026-03-01T13:55:29.245Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Now let me also check the existing types and other files I'll need to reference.",
+          "timestamp": "2026-03-01T13:55:31.805Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Let me also check the types file and `.gitignore`.",
+          "timestamp": "2026-03-01T13:55:32.201Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Read",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/src/figma/types.ts"
+          },
+          "timestamp": "2026-03-01T13:55:32.981Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Read",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/src/figma/url-parser.ts"
+          },
+          "timestamp": "2026-03-01T13:55:33.524Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Glob",
+          "input": {
+            "path": "/home/kenan/repositories/design-spec",
+            "pattern": ".gitignore"
+          },
+          "timestamp": "2026-03-01T13:55:34.142Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Read",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/tsconfig.json"
+          },
+          "timestamp": "2026-03-01T13:55:34.595Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Read",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/.gitignore"
+          },
+          "timestamp": "2026-03-01T13:55:37.175Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Now I have a good understanding of the codebase. Let me create the tasks and implement the plan:\n\n1. Create `src/figma/cache.ts`\n2. Create `src/figma/rest-client.ts`\n3. Update `src/analyzer/design-analyzer.ts`\n4. Update `src/index.ts`\n5. Update `package.json`\n6. Delete `src/figma/client.ts`\n7. Add `.figma-cache/` to `.gitignore`\n\nLet me start implementing. I have all the context I need.",
+          "timestamp": "2026-03-01T13:55:40.810Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Now I have full context. Let me implement all the changes. I'll create the new files and modify existing ones.",
+          "timestamp": "2026-03-01T13:55:41.526Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskCreate",
+          "input": {
+            "activeForm": "Creating cache module",
+            "description": "Local file cache for Figma API responses in .figma-cache/ with 1-hour TTL",
+            "subject": "Create src/figma/cache.ts"
+          },
+          "timestamp": "2026-03-01T13:55:42.979Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskCreate",
+          "input": {
+            "activeForm": "Creating REST client",
+            "description": "Direct Figma REST API client with throttling, retry, and batch node fetching",
+            "subject": "Create src/figma/rest-client.ts"
+          },
+          "timestamp": "2026-03-01T13:55:44.245Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskCreate",
+          "input": {
+            "activeForm": "Updating design analyzer",
+            "description": "Replace YAML parsing with JSON, use batch node fetching, import new REST client",
+            "subject": "Update design-analyzer.ts for REST client"
+          },
+          "timestamp": "2026-03-01T13:55:45.319Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskCreate",
+          "input": {
+            "activeForm": "Updating entry point and dependencies",
+            "description": "Wire up REST client, add --no-cache flag, remove MCP deps, delete old client.ts",
+            "subject": "Update index.ts and package.json, delete old client"
+          },
+          "timestamp": "2026-03-01T13:55:46.814Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskUpdate",
+          "input": {
+            "status": "in_progress",
+            "taskId": "1"
+          },
+          "timestamp": "2026-03-01T13:55:49.197Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Write",
+          "input": {
+            "content": "import { mkdir, readFile, writeFile, stat } from \"node:fs/promises\";\nimport { join } from \"node:path\";\nimport { createHash } from \"node:crypto\";\n\nconst CACHE_DIR = \".figma-cache\";\nconst DEFAULT_TTL_MS = 60 * 60 * 1000; // 1 hour\n\nfunction cacheKey(parts: string[]): string {\n  const hash = createHash(\"sha256\").update(parts.join(\"|\")).digest(\"hex\").slice(0, 16);\n  return hash;\n}\n\nfunction cachePath(key: string): string {\n  return join(CACHE_DIR, `${key}.json`);\n}\n\nexport async function getCached(parts: string[]): Promise<unknown | null> {\n  const path = cachePath(cacheKey(parts));\n  try {\n    const info = await stat(path);\n    if (Date.now() - info.mtimeMs > DEFAULT_TTL_MS) {\n      return null; // expired\n    }\n    const raw = await readFile(path, \"utf-8\");\n    return JSON.parse(raw);\n  } catch {\n    return null;\n  }\n}\n\nexport async function setCache(parts: string[], data: unknown): Promise<void> {\n  await mkdir(CACHE_DIR, { recursive: true });\n  const path = cachePath(cacheKey(parts));\n  await writeFile(path, JSON.stringify(data), \"utf-8\");\n}\n",
+            "file_path": "/home/kenan/repositories/design-spec/src/figma/cache.ts"
+          },
+          "timestamp": "2026-03-01T13:55:55.780Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskUpdate",
+          "input": {
+            "status": "completed",
+            "taskId": "1"
+          },
+          "timestamp": "2026-03-01T13:55:58.175Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskUpdate",
+          "input": {
+            "status": "in_progress",
+            "taskId": "2"
+          },
+          "timestamp": "2026-03-01T13:55:58.507Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Write",
+          "input": {
+            "content": "import type {\n  FigmaFileResponse,\n  FigmaFileNodesResponse,\n  FigmaNode,\n} from \"./types.js\";\nimport { getCached, setCache } from \"./cache.js\";\n\nconst BASE_URL = \"https://api.figma.com\";\nconst MAX_RETRIES = 4;\nconst BACKOFF_BASE_MS = 5000;\n\nfunction sleep(ms: number): Promise<void> {\n  return new Promise((resolve) => setTimeout(resolve, ms));\n}\n\nexport class FigmaRestClient {\n  private lastRequestTime = 0;\n  private useCache: boolean;\n\n  constructor(\n    private apiKey: string,\n    private minRequestGap = 1500,\n    options?: { cache?: boolean }\n  ) {\n    this.useCache = options?.cache ?? true;\n  }\n\n  /**\n   * GET /v1/files/:key — returns file metadata + top-level page nodes.\n   * Use depth to limit traversal (depth=1 gives pages without children).\n   */\n  async getFile(fileKey: string, depth?: number): Promise<FigmaFileResponse> {\n    const params = new URLSearchParams();\n    if (depth !== undefined) params.set(\"depth\", String(depth));\n    const qs = params.toString();\n    const url = `${BASE_URL}/v1/files/${fileKey}${qs ? `?${qs}` : \"\"}`;\n\n    const cacheKey = [\"getFile\", fileKey, String(depth ?? \"\")];\n    if (this.useCache) {\n      const cached = await getCached(cacheKey);\n      if (cached) return cached as FigmaFileResponse;\n    }\n\n    const data = (await this.request(url)) as FigmaFileResponse;\n\n    if (this.useCache) {\n      await setCache(cacheKey, data);\n    }\n    return data;\n  }\n\n  /**\n   * GET /v1/files/:key/nodes?ids=X,Y,Z — batch fetch specific nodes.\n   * Returns a map of nodeId -> { document, components, styles }.\n   */\n  async getNodes(\n    fileKey: string,\n    nodeIds: string[],\n    depth?: number\n  ): Promise<Record<string, { document: FigmaNode }>> {\n    const params = new URLSearchParams();\n    params.set(\"ids\", nodeIds.join(\",\"));\n    if (depth !== undefined) params.set(\"depth\", String(depth));\n    const url = `${BASE_URL}/v1/files/${fileKey}/nodes?${params.toString()}`;\n\n    const cacheKey = [\n      \"getNodes\",\n      fileKey,\n      nodeIds.sort().join(\",\"),\n      String(depth ?? \"\"),\n    ];\n    if (this.useCache) {\n      const cached = await getCached(cacheKey);\n      if (cached) return cached as Record<string, { document: FigmaNode }>;\n    }\n\n    const data = (await this.request(url)) as FigmaFileNodesResponse;\n    const result: Record<string, { document: FigmaNode }> = {};\n\n    for (const [id, node] of Object.entries(data.nodes)) {\n      if (node) {\n        result[id] = { document: node.document };\n      }\n    }\n\n    if (this.useCache) {\n      await setCache(cacheKey, result);\n    }\n    return result;\n  }\n\n  private async request(url: string): Promise<unknown> {\n    // Throttle\n    const now = Date.now();\n    const elapsed = now - this.lastRequestTime;\n    if (elapsed < this.minRequestGap) {\n      await sleep(this.minRequestGap - elapsed);\n    }\n\n    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {\n      this.lastRequestTime = Date.now();\n\n      const res = await fetch(url, {\n        headers: { \"X-FIGMA-TOKEN\": this.apiKey },\n      });\n\n      if (res.status === 429 && attempt < MAX_RETRIES) {\n        const backoff = BACKOFF_BASE_MS * Math.pow(2, attempt);\n        await sleep(backoff);\n        continue;\n      }\n\n      if (!res.ok) {\n        const body = await res.text().catch(() => \"\");\n        throw new Error(\n          `Figma API ${res.status}: ${res.statusText}${body ? ` — ${body}` : \"\"}`\n        );\n      }\n\n      return res.json();\n    }\n\n    throw new Error(`Figma API request failed after ${MAX_RETRIES} retries`);\n  }\n}\n",
+            "file_path": "/home/kenan/repositories/design-spec/src/figma/rest-client.ts"
+          },
+          "timestamp": "2026-03-01T13:56:14.558Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskUpdate",
+          "input": {
+            "status": "completed",
+            "taskId": "2"
+          },
+          "timestamp": "2026-03-01T13:56:17.117Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskUpdate",
+          "input": {
+            "status": "in_progress",
+            "taskId": "3"
+          },
+          "timestamp": "2026-03-01T13:56:17.473Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Now rewrite `design-analyzer.ts` to use the REST client with JSON parsing and batch node fetching.",
+          "timestamp": "2026-03-01T13:56:19.750Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Write",
+          "input": {
+            "content": "import type { FigmaRestClient } from \"../figma/rest-client.js\";\nimport type { FigmaNode } from \"../figma/types.js\";\nimport { extractFrame } from \"./structure-extractor.js\";\nimport type {\n  DesignAnalysis,\n  PageAnalysis,\n  ComponentInfo,\n  InferredEntity,\n  NavigationItem,\n  ScreenType,\n} from \"./types.js\";\n\nexport class DesignAnalyzer {\n  constructor(private client: FigmaRestClient) {}\n\n  async analyze(fileKey: string, nodeId?: string): Promise<DesignAnalysis> {\n    if (nodeId) {\n      return this.analyzeNode(fileKey, nodeId);\n    }\n\n    // 1. Shallow fetch for file overview (one API call)\n    const file = await this.client.getFile(fileKey, 1);\n    const fileName = file.name ?? \"Untitled\";\n\n    const pages = file.document?.children;\n    if (!pages || pages.length === 0) {\n      throw new Error(\"Figma file appears to be empty or inaccessible.\");\n    }\n\n    const components = this.extractComponents(file.components);\n\n    // 2. Batch fetch all pages in one API call\n    const pageIds = pages.map((p) => p.id);\n    const nodesMap = await this.client.getNodes(fileKey, pageIds);\n\n    const pageAnalyses: PageAnalysis[] = [];\n    for (const page of pages) {\n      const fullNode = nodesMap[page.id]?.document ?? page;\n      const children = fullNode.children ?? [];\n      const frames = children\n        .filter(\n          (child) =>\n            child.type === \"FRAME\" ||\n            child.type === \"COMPONENT\" ||\n            child.type === \"COMPONENT_SET\" ||\n            child.type === \"SECTION\"\n        )\n        .map((frame) => extractFrame(frame));\n\n      pageAnalyses.push({\n        id: fullNode.id,\n        name: fullNode.name,\n        frames,\n      });\n    }\n\n    return this.buildAnalysis(fileName, pageAnalyses, components);\n  }\n\n  private async analyzeNode(\n    fileKey: string,\n    nodeId: string\n  ): Promise<DesignAnalysis> {\n    // Single API call for the specific node\n    const nodesMap = await this.client.getNodes(fileKey, [nodeId]);\n    const entry = nodesMap[nodeId];\n\n    if (!entry) {\n      throw new Error(`Node ${nodeId} not found in file.`);\n    }\n\n    const rootNode = entry.document;\n\n    // Also get file-level metadata for the file name\n    const file = await this.client.getFile(fileKey, 1);\n    const fileName = file.name ?? \"Untitled\";\n    const components = this.extractComponents(file.components);\n\n    // If the node itself has child frames, treat each as a screen\n    const children = rootNode.children ?? [];\n    const frameNodes =\n      children.length > 0\n        ? children.filter(\n            (c) =>\n              c.type === \"FRAME\" ||\n              c.type === \"COMPONENT\" ||\n              c.type === \"COMPONENT_SET\" ||\n              c.type === \"SECTION\"\n          )\n        : [rootNode];\n\n    const frames = frameNodes.map((f) => extractFrame(f));\n\n    const pageAnalysis: PageAnalysis = {\n      id: rootNode.id,\n      name: rootNode.name,\n      frames,\n    };\n\n    return this.buildAnalysis(fileName, [pageAnalysis], components);\n  }\n\n  private extractComponents(\n    raw: Record<string, { key: string; name: string; description: string }> | undefined\n  ): ComponentInfo[] {\n    if (!raw) return [];\n    return Object.values(raw).map((c) => ({\n      name: c.name,\n      description: c.description ?? \"\",\n      key: c.key,\n    }));\n  }\n\n  private buildAnalysis(\n    fileName: string,\n    pages: PageAnalysis[],\n    components: ComponentInfo[]\n  ): DesignAnalysis {\n    const allEntities: InferredEntity[] = [];\n    const allNavigation: NavigationItem[] = [];\n    const screenTypes = new Set<ScreenType>();\n\n    for (const page of pages) {\n      for (const frame of page.frames) {\n        screenTypes.add(frame.screenType);\n        allEntities.push(...frame.entities);\n        allNavigation.push(...frame.navigation);\n      }\n    }\n\n    // Deduplicate entities by name, merging fields\n    const entityMap = new Map<string, InferredEntity>();\n    for (const entity of allEntities) {\n      const existing = entityMap.get(entity.name);\n      if (existing) {\n        const mergedFields = [\n          ...new Set([...existing.fields, ...entity.fields]),\n        ];\n        entityMap.set(entity.name, {\n          ...existing,\n          fields: mergedFields,\n          source: `${existing.source}; ${entity.source}`,\n        });\n      } else {\n        entityMap.set(entity.name, { ...entity });\n      }\n    }\n\n    // Deduplicate navigation\n    const navSet = new Set<string>();\n    const uniqueNav = allNavigation.filter((n) => {\n      if (navSet.has(n.label)) return false;\n      navSet.add(n.label);\n      return true;\n    });\n\n    return {\n      fileName,\n      pages,\n      components,\n      allEntities: [...entityMap.values()],\n      allNavigation: uniqueNav,\n      screenTypes: [...screenTypes],\n    };\n  }\n}\n",
+            "file_path": "/home/kenan/repositories/design-spec/src/analyzer/design-analyzer.ts"
+          },
+          "timestamp": "2026-03-01T13:56:38.094Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskUpdate",
+          "input": {
+            "status": "completed",
+            "taskId": "3"
+          },
+          "timestamp": "2026-03-01T13:56:40.643Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskUpdate",
+          "input": {
+            "status": "in_progress",
+            "taskId": "4"
+          },
+          "timestamp": "2026-03-01T13:56:40.996Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Now update `index.ts`, `package.json`, `.gitignore`, and delete the old client.",
+          "timestamp": "2026-03-01T13:56:43.587Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Write",
+          "input": {
+            "content": "#!/usr/bin/env node\n\nimport { resolve } from \"node:path\";\nimport { Command } from \"commander\";\nimport chalk from \"chalk\";\nimport ora from \"ora\";\nimport { loadConfig } from \"./config.js\";\nimport { parseFigmaUrl } from \"./figma/url-parser.js\";\nimport { FigmaRestClient } from \"./figma/rest-client.js\";\nimport { DesignAnalyzer } from \"./analyzer/design-analyzer.js\";\nimport { SpecGenerator } from \"./generator/spec-generator.js\";\nimport { SpecReviser } from \"./generator/spec-reviser.js\";\nimport { CodebaseAnalyzer } from \"./codebase/codebase-analyzer.js\";\nimport { writeSpec } from \"./output/markdown-writer.js\";\n\nconst program = new Command();\n\nprogram\n  .name(\"design-spec\")\n  .description(\n    \"Generate backend technical specifications from Figma designs\"\n  )\n  .version(\"1.0.0\")\n  .argument(\"<figma-url>\", \"Figma file URL to analyze\")\n  .option(\"-o, --output <path>\", \"Output file path\", \"./backend-spec.md\")\n  .option(\"--model <model>\", \"Claude model to use\", \"claude-sonnet-4-20250514\")\n  .option(\"-p, --project <path>\", \"Project directory to match spec against\")\n  .option(\"--no-cache\", \"Skip local Figma API cache\")\n  .action(async (figmaUrl: string, options: { output: string; model: string; project?: string; cache: boolean }) => {\n    try {\n      // Load and validate config\n      const config = loadConfig();\n\n      // Parse Figma URL\n      const { fileKey, nodeId } = parseFigmaUrl(figmaUrl);\n      console.log(\n        chalk.blue(`\\nFile key: ${fileKey}${nodeId ? `, Node: ${nodeId}` : \"\"}`)\n      );\n\n      // Create Figma REST client\n      const connectSpinner = ora(\"Connecting to Figma API...\").start();\n      const figmaClient = new FigmaRestClient(config.FIGMA_API_KEY, 1500, {\n        cache: options.cache,\n      });\n      connectSpinner.succeed(\"Figma REST client ready\");\n\n      // Analyze design\n      const analyzeSpinner = ora(\"Analyzing design structure...\").start();\n      const analyzer = new DesignAnalyzer(figmaClient);\n      const analysis = await analyzer.analyze(fileKey, nodeId);\n\n      const frameCount = analysis.pages.reduce(\n        (sum, p) => sum + p.frames.length,\n        0\n      );\n      const entityCount = analysis.allEntities.length;\n      analyzeSpinner.succeed(\n        `Analyzed ${analysis.pages.length} pages, ${frameCount} frames, ${entityCount} entities`\n      );\n\n      // Generate spec\n      const genSpinner = ora(\n        `Generating backend specification with ${options.model}...`\n      ).start();\n      const generator = new SpecGenerator(config.ANTHROPIC_API_KEY, {\n        model: options.model,\n      });\n      let spec = await generator.generate(analysis);\n      genSpinner.succeed(\"Backend specification generated\");\n\n      // Pass 2: Revise spec to match project codebase (if --project provided)\n      if (options.project) {\n        const projectPath = resolve(options.project);\n\n        const analyzeCodebaseSpinner = ora(\"Analyzing project codebase...\").start();\n        const codebaseAnalyzer = new CodebaseAnalyzer();\n        const profile = await codebaseAnalyzer.analyze(projectPath);\n\n        const detectedItems: string[] = [];\n        if (profile.framework.name) detectedItems.push(profile.framework.name);\n        if (profile.database.orm) detectedItems.push(profile.database.orm);\n        if (profile.language.primary) detectedItems.push(profile.language.primary);\n        analyzeCodebaseSpinner.succeed(\n          `Codebase analyzed${detectedItems.length > 0 ? ` (${detectedItems.join(\", \")})` : \"\"}`\n        );\n\n        const reviseSpinner = ora(\"Revising spec to match codebase patterns...\").start();\n        const reviser = new SpecReviser(config.ANTHROPIC_API_KEY, {\n          model: options.model,\n        });\n        spec = await reviser.revise(spec, profile);\n        reviseSpinner.succeed(\"Specification revised to match codebase\");\n      }\n\n      // Write output\n      const writeSpinner = ora(\"Writing specification...\").start();\n      const outputPath = await writeSpec(spec, {\n        outputPath: options.output,\n        figmaUrl,\n        fileName: analysis.fileName,\n      });\n      writeSpinner.succeed(`Specification written to ${chalk.green(outputPath)}`);\n\n      console.log(chalk.bold.green(\"\\nDone!\"));\n    } catch (error) {\n      const message =\n        error instanceof Error ? error.message : String(error);\n      console.error(chalk.red(`\\nError: ${message}`));\n      process.exit(1);\n    }\n  });\n\nprogram.parse();\n",
+            "file_path": "/home/kenan/repositories/design-spec/src/index.ts"
+          },
+          "timestamp": "2026-03-01T13:57:00.625Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Edit",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/package.json",
+            "new_string": "  \"description\": \"Generate backend technical specifications from Figma designs\",",
+            "old_string": "  \"description\": \"Generate backend technical specifications from Figma designs using MCP and Claude\",",
+            "replace_all": false
+          },
+          "timestamp": "2026-03-01T13:57:01.365Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Edit",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/package.json",
+            "new_string": "    \"chalk\": \"^5.4.1\",",
+            "old_string": "    \"@modelcontextprotocol/sdk\": \"^1.12.1\",\n    \"chalk\": \"^5.4.1\",",
+            "replace_all": false
+          },
+          "timestamp": "2026-03-01T13:57:04.989Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Edit",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/package.json",
+            "new_string": "    \"zod\": \"^3.24.2\"",
+            "old_string": "    \"yaml\": \"^2.8.2\",\n    \"zod\": \"^3.24.2\"",
+            "replace_all": false
+          },
+          "timestamp": "2026-03-01T13:57:06.224Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Edit",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/.gitignore",
+            "new_string": "node_modules/\ndist/\n.env\n*.tsbuildinfo\n.figma-cache/",
+            "old_string": "node_modules/\ndist/\n.env\n*.tsbuildinfo",
+            "replace_all": false
+          },
+          "timestamp": "2026-03-01T13:57:07.461Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Now delete the old MCP client and remove the unused packages.",
+          "timestamp": "2026-03-01T13:57:10.114Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Bash",
+          "input": {
+            "command": "rm /home/kenan/repositories/design-spec/src/figma/client.ts",
+            "description": "Delete old MCP client file"
+          },
+          "timestamp": "2026-03-01T13:57:10.934Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Bash",
+          "input": {
+            "command": "npm uninstall @modelcontextprotocol/sdk yaml",
+            "description": "Remove MCP SDK and yaml dependencies"
+          },
+          "timestamp": "2026-03-01T13:57:14.501Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Good, 78 packages removed. Let me verify the build compiles cleanly.",
+          "timestamp": "2026-03-01T13:58:34.752Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Bash",
+          "input": {
+            "command": "npx tsc --noEmit 2>&1",
+            "description": "Type-check the project"
+          },
+          "timestamp": "2026-03-01T13:58:35.492Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Clean build, no errors. Let me verify the final state of all changed files.",
+          "timestamp": "2026-03-01T13:58:44.288Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Read",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/package.json"
+          },
+          "timestamp": "2026-03-01T13:58:44.659Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "TaskUpdate",
+          "input": {
+            "status": "completed",
+            "taskId": "4"
+          },
+          "timestamp": "2026-03-01T13:58:47.155Z"
+        },
+        {
+          "type": "assistant",
+          "text": "All done. Here's a summary of what was implemented:\n\n**Created:**\n- `src/figma/rest-client.ts` — Direct Figma REST API client with throttling (1.5s min gap), exponential backoff on 429, and two endpoints: `getFile()` for file overview and `getNodes()` for batch node fetching\n- `src/figma/cache.ts` — Local file cache in `.figma-cache/` with 1-hour TTL using SHA-256 hashed keys\n\n**Modified:**\n- `src/analyzer/design-analyzer.ts` — Replaced YAML parsing with direct JSON from the REST API; uses batch `getNodes()` to fetch all pages in a single request (2 total API calls for full file, vs N+1 before)\n- `src/index.ts` — Replaced `FigmaMcpClient` with `FigmaRestClient`, removed MCP connection/disconnection lifecycle, added `--no-cache` flag\n- `package.json` — Removed `@modelcontextprotocol/sdk` and `yaml` dependencies (78 packages removed)\n- `.gitignore` — Added `.figma-cache/`\n\n**Deleted:**\n- `src/figma/client.ts` — Old MCP client\n\n**Key improvements:**\n- Full file analysis: **2 API calls** (getFile + batch getNodes) vs N+1 through MCP\n- Single node analysis: **2 API calls** (getNodes + getFile for metadata) vs unpredictable MCP internals\n- Re-runs use cached responses (no API calls at all within 1 hour)\n- Build passes cleanly with `tsc --noEmit`",
+          "timestamp": "2026-03-01T13:58:56.678Z"
+        },
+        {
+          "type": "user",
+          "text": "how could I run it  now? ",
+          "timestamp": "2026-03-01T13:59:05.175Z"
+        },
+        {
+          "type": "assistant",
+          "text": "\n\nThe usage is the same as before:\n\n```bash\nnpm run dev -- \"<figma-url>\"\n```\n\nWith the new options:\n\n```bash\n# Full file analysis\nnpm run dev -- \"https://www.figma.com/design/ABC123/My-Design\"\n\n# Specific node\nnpm run dev -- \"https://www.figma.com/design/ABC123/My-Design?node-id=0-1\"\n\n# Skip cache (force fresh API calls)\nnpm run dev -- --no-cache \"https://www.figma.com/design/ABC123/My-Design\"\n\n# With project matching\nnpm run dev -- -p ./my-project \"https://www.figma.com/design/ABC123/My-Design\"\n```\n\nMake sure your `.env` has `FIGMA_API_KEY` and `ANTHROPIC_API_KEY` set.",
+          "timestamp": "2026-03-01T13:59:10.141Z"
+        },
+        {
+          "type": "user",
+          "text": "thats' not correct: \nnpm run dev -- \"https://www.figma.com/design/bCWIhNdizlN016kHbPY6Zh/Community?node-id=3077-45214&t=0yZL********Wu-4\" -p /home/kenan/repositories/dosty/b2c/",
+          "timestamp": "2026-03-01T13:59:36.758Z"
+        },
+        {
+          "type": "assistant",
+          "text": "The user is running the command and seems to be having an issue. Let me look at what might be wrong. They're running:\n\n```\nnpm run dev -- \"https://www.figma.com/design/bCWIhNdizlN016kHbPY6Zh/Community?node-id=3077-45214&t=0yZL********Wu-4\" -p /home/kenan/repositories/dosty/b2c/\n```\n\nActually, I'm not sure what's \"not correct\" - they might be telling me the correct way to run it vs what I showed, or they might be saying it doesn't work. \n\nLooking more carefully at what they said, I think they're showing me the actual command they tried and it's failing. They want help debugging why it's not working, but I don't have an error message yet. I should ask what error they're seeing, or try to figure out what might be going wrong with the command itself.\n\nLet me just test it out and see what happens.",
+          "timestamp": "2026-03-01T13:59:45.478Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Let me run it and see what happens.",
+          "timestamp": "2026-03-01T13:59:45.485Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Bash",
+          "input": {
+            "command": "npm run dev -- \"https://www.figma.com/design/bCWIhNdizlN016kHbPY6Zh/Community?node-id=3077-45214&t=0yZLLUqfiHAteSWu-4\" -p /home/kenan/repositories/dosty/b2c/ 2>&1",
+            "description": "Run the tool with user's Figma URL",
+            "timeout": 120000
+          },
+          "timestamp": "2026-03-01T13:59:46.447Z"
+        },
+        {
+          "type": "user",
+          "text": "[Request interrupted by user for tool use]",
+          "timestamp": "2026-03-01T14:00:11.590Z"
+        },
+        {
+          "type": "user",
+          "text": "it works? ",
+          "timestamp": "2026-03-01T14:00:49.557Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Great, glad it works! What was the issue you were pointing out with my examples earlier?",
+          "timestamp": "2026-03-01T14:00:52.451Z"
+        },
+        {
+          "type": "user",
+          "text": "it still in ⠹ Analyzing design structure...",
+          "timestamp": "2026-03-01T14:01:05.623Z"
+        },
+        {
+          "type": "assistant",
+          "text": "That's expected — it's waiting on the Figma API responses. With the node-id path it makes 2 API calls (one for the node, one for file metadata), each with a 1.5s throttle gap between them.\n\nIf it's been stuck for a long time though, it could be:\n- **429 rate limit** — the retry backoff starts at 5s and doubles each attempt (up to 4 retries)\n- **Large node tree** — if that node has many nested children, the response can be slow\n\nHow long has it been sitting there?",
+          "timestamp": "2026-03-01T14:01:11.410Z"
+        },
+        {
+          "type": "user",
+          "text": "Error: Figma API 429: Too Many Requests — {\"status\":429,\"err\":\"Rate limit exceeded\"}",
+          "timestamp": "2026-03-01T14:01:23.776Z"
+        },
+        {
+          "type": "assistant",
+          "text": "\n\nThe 1.5s gap isn't enough. Let me bump it up and also make the initial backoff less aggressive so recovery is faster.",
+          "timestamp": "2026-03-01T14:01:27.001Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Read",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/src/figma/rest-client.ts"
+          },
+          "timestamp": "2026-03-01T14:01:27.420Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Two issues: the default gap is too short, and 429 retries exhaust too quickly. Let me also respect the `Retry-After` header that Figma sends.",
+          "timestamp": "2026-03-01T14:01:30.757Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Edit",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/src/figma/rest-client.ts",
+            "new_string": "const MAX_RETRIES = 6;\nconst BACKOFF_BASE_MS = 10000;",
+            "old_string": "const MAX_RETRIES = 4;\nconst BACKOFF_BASE_MS = 5000;",
+            "replace_all": false
+          },
+          "timestamp": "2026-03-01T14:01:31.907Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Edit",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/src/figma/rest-client.ts",
+            "new_string": "      if (res.status === 429 && attempt < MAX_RETRIES) {\n        const retryAfter = res.headers.get(\"retry-after\");\n        const backoff = retryAfter\n          ? parseInt(retryAfter, 10) * 1000\n          : BACKOFF_BASE_MS * Math.pow(2, attempt);\n        await sleep(backoff);\n        continue;\n      }",
+            "old_string": "      if (res.status === 429 && attempt < MAX_RETRIES) {\n        const backoff = BACKOFF_BASE_MS * Math.pow(2, attempt);\n        await sleep(backoff);\n        continue;\n      }",
+            "replace_all": false
+          },
+          "timestamp": "2026-03-01T14:01:36.691Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Now bump the default gap in `index.ts` from 1500 to 3000ms:",
+          "timestamp": "2026-03-01T14:01:39.464Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Edit",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/src/figma/rest-client.ts",
+            "new_string": "    private minRequestGap = 3000,",
+            "old_string": "    private minRequestGap = 1500,",
+            "replace_all": false
+          },
+          "timestamp": "2026-03-01T14:01:40.647Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Edit",
+          "input": {
+            "file_path": "/home/kenan/repositories/design-spec/src/index.ts",
+            "new_string": "      const figmaClient = new FigmaRestClient(config.FIGMA_API_KEY, 3000, {",
+            "old_string": "      const figmaClient = new FigmaRestClient(config.FIGMA_API_KEY, 1500, {",
+            "replace_all": false
+          },
+          "timestamp": "2026-03-01T14:01:44.513Z"
+        },
+        {
+          "type": "assistant",
+          "text": "Changes:\n- **Gap between requests**: 1.5s → **3s**\n- **Max retries on 429**: 4 → **6**\n- **Backoff base**: 5s → **10s** (so retries wait 10s, 20s, 40s, 80s, 160s, 320s)\n- **Respects `Retry-After` header** from Figma if present\n\nTry running it again — it should survive the rate limit now. And on the second run, the cache will kick in so it won't hit the API at all.",
+          "timestamp": "2026-03-01T14:01:49.424Z"
+        },
+        {
+          "type": "user",
+          "text": "create branch and push changes to there",
+          "timestamp": "2026-03-01T14:01:55.527Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Bash",
+          "input": {
+            "command": "git status",
+            "description": "Show working tree status"
+          },
+          "timestamp": "2026-03-01T14:01:59.041Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Bash",
+          "input": {
+            "command": "git diff --stat",
+            "description": "Show diff summary of all changes"
+          },
+          "timestamp": "2026-03-01T14:01:59.871Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Bash",
+          "input": {
+            "command": "git log --oneline -5",
+            "description": "Show recent commits"
+          },
+          "timestamp": "2026-03-01T14:02:00.440Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Bash",
+          "input": {
+            "command": "git checkout -b replace-mcp-with-rest-api",
+            "description": "Create and switch to new branch"
+          },
+          "timestamp": "2026-03-01T14:02:03.515Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Bash",
+          "input": {
+            "command": "git add .gitignore package.json package-lock.json src/analyzer/design-analyzer.ts src/figma/client.ts src/figma/cache.ts src/figma/rest-client.ts src/index.ts",
+            "description": "Stage all relevant files"
+          },
+          "timestamp": "2026-03-01T14:02:07.587Z"
+        },
+        {
+          "type": "tool_use",
+          "name": "Bash",
+          "input": {
+            "command": "git commit -m \"$(cat <<'EOF'\nReplace MCP with direct Figma REST API to fix rate limiting\n\nThe MCP client made multiple internal API calls per invocation that we\ncouldn't control, causing 429s. This replaces it with direct REST API\ncalls using batch node fetching (2 calls for full file vs N+1 before),\nlocal response caching (.figma-cache/), and proper retry with\nRetry-After header support.\n\n- Add src/figma/rest-client.ts (throttled fetch + exponential backoff)\n- Add src/figma/cache.ts (1-hour TTL file cache)\n- Remove @modelcontextprotocol/sdk and yaml dependencies\n- Add --no-cache CLI flag\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n)\"",
+            "description": "Commit all changes"
+          },
+          "timestamp": "2026-03-01T14:02:18.145Z"
+        }
+      ],
+      "total_additions": 227,
+      "total_deletions": 144,
+      "accepted_lines": 215,
+      "overriden_lines": 0
+    }
+  }
+}
