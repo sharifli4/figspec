@@ -1,0 +1,128 @@
+#!/usr/bin/env node
+
+import { resolve } from "node:path";
+import { Command } from "commander";
+import chalk from "chalk";
+import ora from "ora";
+import { loadConfig } from "./config.js";
+import { parseFigmaUrl } from "./figma/url-parser.js";
+import { FigmaMcpClient } from "./figma/client.js";
+import { DesignAnalyzer } from "./analyzer/design-analyzer.js";
+import { SpecGenerator } from "./generator/spec-generator.js";
+import { SpecReviser } from "./generator/spec-reviser.js";
+import { CodebaseAnalyzer } from "./codebase/codebase-analyzer.js";
+import { writeSpec } from "./output/markdown-writer.js";
+
+const program = new Command();
+
+program
+  .name("design-spec")
+  .description(
+    "Generate backend technical specifications from Figma designs using MCP and Claude"
+  )
+  .version("1.0.0")
+  .argument("<figma-url>", "Figma file URL to analyze")
+  .option("-o, --output <path>", "Output file path", "./backend-spec.md")
+  .option("--model <model>", "Claude model to use", "claude-sonnet-4-20250514")
+  .option("-p, --project <path>", "Project directory to match spec against")
+  .action(async (figmaUrl: string, options: { output: string; model: string; project?: string }) => {
+    let mcpClient: FigmaMcpClient | null = null;
+
+    try {
+      // Load and validate config
+      const config = loadConfig();
+
+      // Parse Figma URL
+      const { fileKey, nodeId } = parseFigmaUrl(figmaUrl);
+      console.log(
+        chalk.blue(`\nFile key: ${fileKey}${nodeId ? `, Node: ${nodeId}` : ""}`)
+      );
+
+      // Connect to Figma MCP server
+      const connectSpinner = ora("Connecting to Figma MCP server...").start();
+      mcpClient = new FigmaMcpClient(config.FIGMA_API_KEY);
+      await mcpClient.connect();
+
+      const tools = mcpClient.getAvailableTools();
+      connectSpinner.succeed(
+        `Connected to Figma MCP server (${tools.length} tools available)`
+      );
+
+      // Check for expected tools
+      if (!mcpClient.hasTool("get_figma_data")) {
+        console.log(
+          chalk.yellow(`  Warning: Expected tool "get_figma_data" not found`)
+        );
+      }
+
+      // Analyze design
+      const analyzeSpinner = ora("Analyzing design structure...").start();
+      const analyzer = new DesignAnalyzer(mcpClient);
+      const analysis = await analyzer.analyze(fileKey, nodeId);
+
+      const frameCount = analysis.pages.reduce(
+        (sum, p) => sum + p.frames.length,
+        0
+      );
+      const entityCount = analysis.allEntities.length;
+      analyzeSpinner.succeed(
+        `Analyzed ${analysis.pages.length} pages, ${frameCount} frames, ${entityCount} entities`
+      );
+
+      // Generate spec
+      const genSpinner = ora(
+        `Generating backend specification with ${options.model}...`
+      ).start();
+      const generator = new SpecGenerator(config.ANTHROPIC_API_KEY, {
+        model: options.model,
+      });
+      let spec = await generator.generate(analysis);
+      genSpinner.succeed("Backend specification generated");
+
+      // Pass 2: Revise spec to match project codebase (if --project provided)
+      if (options.project) {
+        const projectPath = resolve(options.project);
+
+        const analyzeCodebaseSpinner = ora("Analyzing project codebase...").start();
+        const codebaseAnalyzer = new CodebaseAnalyzer();
+        const profile = await codebaseAnalyzer.analyze(projectPath);
+
+        const detectedItems: string[] = [];
+        if (profile.framework.name) detectedItems.push(profile.framework.name);
+        if (profile.database.orm) detectedItems.push(profile.database.orm);
+        if (profile.language.primary) detectedItems.push(profile.language.primary);
+        analyzeCodebaseSpinner.succeed(
+          `Codebase analyzed${detectedItems.length > 0 ? ` (${detectedItems.join(", ")})` : ""}`
+        );
+
+        const reviseSpinner = ora("Revising spec to match codebase patterns...").start();
+        const reviser = new SpecReviser(config.ANTHROPIC_API_KEY, {
+          model: options.model,
+        });
+        spec = await reviser.revise(spec, profile);
+        reviseSpinner.succeed("Specification revised to match codebase");
+      }
+
+      // Write output
+      const writeSpinner = ora("Writing specification...").start();
+      const outputPath = await writeSpec(spec, {
+        outputPath: options.output,
+        figmaUrl,
+        fileName: analysis.fileName,
+      });
+      writeSpinner.succeed(`Specification written to ${chalk.green(outputPath)}`);
+
+      console.log(chalk.bold.green("\nDone!"));
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+      console.error(chalk.red(`\nError: ${message}`));
+      process.exit(1);
+    } finally {
+      if (mcpClient) {
+        await mcpClient.disconnect();
+      }
+    }
+  });
+
+program.parse();
