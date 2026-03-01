@@ -1,5 +1,4 @@
-import { parse as parseYaml } from "yaml";
-import type { FigmaMcpClient } from "../figma/client.js";
+import type { FigmaRestClient } from "../figma/rest-client.js";
 import type { FigmaNode } from "../figma/types.js";
 import { extractFrame } from "./structure-extractor.js";
 import type {
@@ -11,135 +10,71 @@ import type {
   ScreenType,
 } from "./types.js";
 
-// Shape of the YAML returned by figma-developer-mcp's get_figma_data tool
-interface McpYamlResult {
-  metadata?: {
-    name?: string;
-    components?: Record<
-      string,
-      { id: string; name: string; key: string; componentSetId?: string }
-    >;
-  };
-  nodes?: McpYamlNode[];
-  globalVars?: unknown;
-}
-
-interface McpYamlNode {
-  id: string;
-  name: string;
-  type: string;
-  text?: string;
-  children?: McpYamlNode[];
-  componentId?: string;
-  layout?: string;
-  fills?: string;
-  visible?: boolean;
-}
-
-function mcpNodeToFigmaNode(node: McpYamlNode): FigmaNode {
-  return {
-    id: node.id,
-    name: node.name,
-    type: node.type,
-    characters: node.text,
-    componentId: node.componentId,
-    visible: node.visible,
-    children: node.children?.map(mcpNodeToFigmaNode),
-  };
-}
-
 export class DesignAnalyzer {
-  constructor(private client: FigmaMcpClient) {}
+  constructor(private client: FigmaRestClient) {}
 
   async analyze(fileKey: string, nodeId?: string): Promise<DesignAnalysis> {
     if (nodeId) {
       return this.analyzeNode(fileKey, nodeId);
     }
 
-    // Shallow fetch for file overview
-    const overviewYaml = (await this.client.getFigmaData(
-      fileKey,
-      undefined,
-      1
-    )) as string;
-    const overview = parseYaml(overviewYaml) as McpYamlResult;
+    // 1. Shallow fetch for file overview (one API call)
+    const file = await this.client.getFile(fileKey, 1);
+    const fileName = file.name ?? "Untitled";
 
-    const fileName = overview?.metadata?.name ?? "Untitled";
-    const topNodes = overview?.nodes;
-
-    if (!topNodes || topNodes.length === 0) {
+    const pages = file.document?.children;
+    if (!pages || pages.length === 0) {
       throw new Error("Figma file appears to be empty or inaccessible.");
     }
 
-    const components = this.extractComponents(overview);
+    const components = this.extractComponents(file.components);
 
-    // The top-level nodes are pages. Deep-fetch each page.
+    // 2. Batch fetch all pages in one API call
+    const pageIds = pages.map((p) => p.id);
+    const nodesMap = await this.client.getNodes(fileKey, pageIds);
+
     const pageAnalyses: PageAnalysis[] = [];
-    for (const pageNode of topNodes) {
-      const pageAnalysis = await this.analyzePage(fileKey, pageNode);
-      pageAnalyses.push(pageAnalysis);
+    for (const page of pages) {
+      const fullNode = nodesMap[page.id]?.document ?? page;
+      const children = fullNode.children ?? [];
+      const frames = children
+        .filter(
+          (child) =>
+            child.type === "FRAME" ||
+            child.type === "COMPONENT" ||
+            child.type === "COMPONENT_SET" ||
+            child.type === "SECTION"
+        )
+        .map((frame) => extractFrame(frame));
+
+      pageAnalyses.push({
+        id: fullNode.id,
+        name: fullNode.name,
+        frames,
+      });
     }
 
     return this.buildAnalysis(fileName, pageAnalyses, components);
-  }
-
-  private async analyzePage(
-    fileKey: string,
-    shallowPage: McpYamlNode
-  ): Promise<PageAnalysis> {
-    let rootNode: FigmaNode;
-
-    try {
-      const yamlText = (await this.client.getFigmaData(
-        fileKey,
-        shallowPage.id
-      )) as string;
-      const parsed = parseYaml(yamlText) as McpYamlResult;
-      const fullNode = parsed?.nodes?.[0];
-      rootNode = fullNode
-        ? mcpNodeToFigmaNode(fullNode)
-        : mcpNodeToFigmaNode(shallowPage);
-    } catch {
-      rootNode = mcpNodeToFigmaNode(shallowPage);
-    }
-
-    const children = rootNode.children ?? [];
-    const frames = children
-      .filter(
-        (child) =>
-          child.type === "FRAME" ||
-          child.type === "COMPONENT" ||
-          child.type === "COMPONENT_SET" ||
-          child.type === "SECTION"
-      )
-      .map((frame) => extractFrame(frame));
-
-    return {
-      id: rootNode.id,
-      name: rootNode.name,
-      frames,
-    };
   }
 
   private async analyzeNode(
     fileKey: string,
     nodeId: string
   ): Promise<DesignAnalysis> {
-    const yamlText = (await this.client.getFigmaData(
-      fileKey,
-      nodeId
-    )) as string;
-    const parsed = parseYaml(yamlText) as McpYamlResult;
+    // Single API call for the specific node
+    const nodesMap = await this.client.getNodes(fileKey, [nodeId]);
+    const entry = nodesMap[nodeId];
 
-    const fileName = parsed?.metadata?.name ?? "Untitled";
-    const rootYamlNode = parsed?.nodes?.[0];
-
-    if (!rootYamlNode) {
+    if (!entry) {
       throw new Error(`Node ${nodeId} not found in file.`);
     }
 
-    const rootNode = mcpNodeToFigmaNode(rootYamlNode);
-    const components = this.extractComponents(parsed);
+    const rootNode = entry.document;
+
+    // Also get file-level metadata for the file name
+    const file = await this.client.getFile(fileKey, 1);
+    const fileName = file.name ?? "Untitled";
+    const components = this.extractComponents(file.components);
 
     // If the node itself has child frames, treat each as a screen
     const children = rootNode.children ?? [];
@@ -165,12 +100,13 @@ export class DesignAnalyzer {
     return this.buildAnalysis(fileName, [pageAnalysis], components);
   }
 
-  private extractComponents(parsed: McpYamlResult): ComponentInfo[] {
-    const raw = parsed?.metadata?.components;
+  private extractComponents(
+    raw: Record<string, { key: string; name: string; description: string }> | undefined
+  ): ComponentInfo[] {
     if (!raw) return [];
     return Object.values(raw).map((c) => ({
       name: c.name,
-      description: "",
+      description: c.description ?? "",
       key: c.key,
     }));
   }
