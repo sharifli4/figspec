@@ -6,7 +6,7 @@ import chalk from "chalk";
 import ora from "ora";
 import { loadConfig } from "./config.js";
 import { parseFigmaUrl } from "./figma/url-parser.js";
-import { FigmaMcpClient } from "./figma/client.js";
+import { FigmaRestClient } from "./figma/rest-client.js";
 import { DesignAnalyzer } from "./analyzer/design-analyzer.js";
 import { SpecGenerator } from "./generator/spec-generator.js";
 import { SpecReviser } from "./generator/spec-reviser.js";
@@ -18,16 +18,15 @@ const program = new Command();
 program
   .name("design-spec")
   .description(
-    "Generate backend technical specifications from Figma designs using MCP and Claude"
+    "Generate backend technical specifications from Figma designs"
   )
   .version("1.0.0")
   .argument("<figma-url>", "Figma file URL to analyze")
   .option("-o, --output <path>", "Output file path", "./backend-spec.md")
   .option("--model <model>", "Claude model to use", "claude-sonnet-4-20250514")
   .option("-p, --project <path>", "Project directory to match spec against")
-  .action(async (figmaUrl: string, options: { output: string; model: string; project?: string }) => {
-    let mcpClient: FigmaMcpClient | null = null;
-
+  .option("--no-cache", "Skip local Figma API cache")
+  .action(async (figmaUrl: string, options: { output: string; model: string; project?: string; cache: boolean }) => {
     try {
       // Load and validate config
       const config = loadConfig();
@@ -38,26 +37,16 @@ program
         chalk.blue(`\nFile key: ${fileKey}${nodeId ? `, Node: ${nodeId}` : ""}`)
       );
 
-      // Connect to Figma MCP server
-      const connectSpinner = ora("Connecting to Figma MCP server...").start();
-      mcpClient = new FigmaMcpClient(config.FIGMA_API_KEY);
-      await mcpClient.connect();
-
-      const tools = mcpClient.getAvailableTools();
-      connectSpinner.succeed(
-        `Connected to Figma MCP server (${tools.length} tools available)`
-      );
-
-      // Check for expected tools
-      if (!mcpClient.hasTool("get_figma_data")) {
-        console.log(
-          chalk.yellow(`  Warning: Expected tool "get_figma_data" not found`)
-        );
-      }
+      // Create Figma REST client
+      const connectSpinner = ora("Connecting to Figma API...").start();
+      const figmaClient = new FigmaRestClient(config.FIGMA_API_KEY, 3000, {
+        cache: options.cache,
+      });
+      connectSpinner.succeed("Figma REST client ready");
 
       // Analyze design
       const analyzeSpinner = ora("Analyzing design structure...").start();
-      const analyzer = new DesignAnalyzer(mcpClient);
+      const analyzer = new DesignAnalyzer(figmaClient);
       const analysis = await analyzer.analyze(fileKey, nodeId);
 
       const frameCount = analysis.pages.reduce(
@@ -118,10 +107,6 @@ program
         error instanceof Error ? error.message : String(error);
       console.error(chalk.red(`\nError: ${message}`));
       process.exit(1);
-    } finally {
-      if (mcpClient) {
-        await mcpClient.disconnect();
-      }
     }
   });
 
