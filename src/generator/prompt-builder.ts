@@ -1,6 +1,6 @@
 import { ScreenType, type DesignAnalysis, type FrameAnalysis } from "../analyzer/types.js";
 
-export function buildPrompt(analysis: DesignAnalysis): string {
+export function buildPrompt(analysis: DesignAnalysis, prdContent?: string): string {
   const sections: string[] = [];
 
   sections.push(buildHeader(analysis));
@@ -9,7 +9,12 @@ export function buildPrompt(analysis: DesignAnalysis): string {
   sections.push(buildNavigationSummary(analysis));
   sections.push(buildComponentSummary(analysis));
   sections.push(buildDetailedFrames(analysis));
-  sections.push(buildInstructions(analysis));
+
+  if (prdContent) {
+    sections.push(buildPrdSection(prdContent));
+  }
+
+  sections.push(buildInstructions(analysis, !!prdContent));
 
   return sections.join("\n\n");
 }
@@ -101,7 +106,23 @@ function formatFrame(frame: FrameAnalysis, pageName: string): string {
   return lines.join("\n");
 }
 
-function buildInstructions(analysis: DesignAnalysis): string {
+function buildPrdSection(prdContent: string): string {
+  return `## Product Requirements Document (PRD)
+
+The following PRD describes the product requirements for this project. Use it to cross-reference with the design analysis above.
+
+<prd>
+${prdContent}
+</prd>
+
+**PRD Usage Instructions:**
+- Cross-reference the PRD requirements with the UI elements identified in the design analysis
+- When the PRD defines specific business rules, validation logic, or workflows, include them in the spec even if they are not visible in the UI
+- Prefer entity names, field names, and terminology from the PRD over names inferred from the UI
+- Include any backend-relevant requirements from the PRD that have no direct UI representation (e.g., background jobs, notifications, third-party integrations, rate limits)`;
+}
+
+function buildInstructions(analysis: DesignAnalysis, hasPrd = false): string {
   const hasAuth =
     analysis.screenTypes.includes(ScreenType.LOGIN) ||
     analysis.screenTypes.includes(ScreenType.REGISTRATION);
@@ -148,5 +169,8 @@ ${focusAreas.length > 0 ? `**Special focus areas** based on detected patterns: $
 - Include timestamps (createdAt, updatedAt) and soft-delete (deletedAt) on all entities
 - Use UUID for primary keys
 - Add appropriate indexes for foreign keys and commonly filtered fields
-- Format the entire output as clean, well-structured Markdown`;
+- Format the entire output as clean, well-structured Markdown${hasPrd ? `
+- Cross-reference PRD requirements with the design — the PRD is the source of truth for business rules, entity names, and workflows
+- Include backend requirements from the PRD that are not visible in the UI (e.g., gamification mechanics, conversion ratios, background jobs, notifications)
+- When the PRD and design conflict on naming, prefer the PRD terminology` : ""}`;
 }

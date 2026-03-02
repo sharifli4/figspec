@@ -12,6 +12,7 @@ import { SpecGenerator } from "./generator/spec-generator.js";
 import { SpecReviser } from "./generator/spec-reviser.js";
 import { CodebaseAnalyzer } from "./codebase/codebase-analyzer.js";
 import { writeSpec } from "./output/markdown-writer.js";
+import { loadPrd, detectPrd } from "./prd/prd-loader.js";
 
 const program = new Command();
 
@@ -25,8 +26,9 @@ program
   .option("-o, --output <path>", "Output file path", "./backend-spec.md")
   .option("--model <model>", "Claude model to use", "claude-sonnet-4-20250514")
   .option("-p, --project <path>", "Project directory to match spec against")
+  .option("--prd <path>", "Path to a PRD file to cross-reference with the design")
   .option("--no-cache", "Skip local Figma API cache")
-  .action(async (figmaUrl: string, options: { output: string; model: string; project?: string; cache: boolean }) => {
+  .action(async (figmaUrl: string, options: { output: string; model: string; project?: string; prd?: string; cache: boolean }) => {
     try {
       // Load and validate config
       const config = loadConfig();
@@ -58,6 +60,21 @@ program
         `Analyzed ${analysis.pages.length} pages, ${frameCount} frames, ${entityCount} entities`
       );
 
+      // Load PRD — explicit --prd flag takes priority, otherwise auto-detect from project dir
+      let prdContent: string | undefined;
+      let prdFileName: string | undefined;
+      let prdPath = options.prd;
+      if (!prdPath && options.project) {
+        prdPath = await detectPrd(resolve(options.project)) ?? undefined;
+      }
+      if (prdPath) {
+        const prdSpinner = ora("Loading PRD...").start();
+        const prd = await loadPrd(prdPath);
+        prdContent = prd.content;
+        prdFileName = prd.fileName;
+        prdSpinner.succeed(`PRD loaded: ${chalk.cyan(prd.fileName)}${!options.prd ? " (auto-detected)" : ""}`);
+      }
+
       // Generate spec
       const genSpinner = ora(
         `Generating backend specification with ${options.model}...`
@@ -65,7 +82,7 @@ program
       const generator = new SpecGenerator(config.ANTHROPIC_API_KEY, {
         model: options.model,
       });
-      let spec = await generator.generate(analysis);
+      let spec = await generator.generate(analysis, prdContent);
       genSpinner.succeed("Backend specification generated");
 
       // Pass 2: Revise spec to match project codebase (if --project provided)
@@ -98,6 +115,7 @@ program
         outputPath: options.output,
         figmaUrl,
         fileName: analysis.fileName,
+        prdFile: prdFileName,
       });
       writeSpinner.succeed(`Specification written to ${chalk.green(outputPath)}`);
 

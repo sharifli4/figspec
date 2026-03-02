@@ -12,8 +12,8 @@ export class SpecGenerator {
     this.options = { ...DEFAULT_GENERATOR_OPTIONS, ...options };
   }
 
-  async generate(analysis: DesignAnalysis): Promise<string> {
-    const prompt = buildPrompt(analysis);
+  async generate(analysis: DesignAnalysis, prdContent?: string): Promise<string> {
+    const prompt = buildPrompt(analysis, prdContent);
 
     const response = await this.anthropic.messages.create({
       model: this.options.model,
